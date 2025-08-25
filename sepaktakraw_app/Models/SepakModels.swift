@@ -19,6 +19,7 @@ enum FailureReason: String, Codable, CaseIterable {
     case overSet //トスがオーバー
     case chanceBall //チャンスボールで返した
     case blockCover //ブロックカバー
+    case over   //オーバー
 }
 
 // 1回のプレー(スタッツ)を表す

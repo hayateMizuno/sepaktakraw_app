@@ -138,50 +138,36 @@ struct PlayerSelectionSection: View {
     /// 現在のラリー段階の表示名
     private var rallyStageDisplayName: String {
         switch viewModel.rallyStage {
-        case .serving:
-            return "サーブ"
-        case .receiving:
-            return "レシーブ"
-        case .setting:
-            return "トス"
-        case .attacking:
-            return "アタック"
+        case .serving: return "サーブ"
+        case .receiving: return "レシーブ"
+        case .setting: return "トス"
+        case .attacking: return "アタック"
+        case .blocking: return "ブロック"
+        case .gameEnd: return "ゲーム終了"
         }
     }
     
-    /// 選択状態の説明テキスト
     @ViewBuilder
     private var selectionStatusText: some View {
         HStack {
-            Image(systemName: "info.circle")
-                .foregroundColor(.blue)
-                .font(.caption)
-            
-            Text(getSelectionStatusMessage())
-                .font(.caption2)
-                .foregroundColor(.secondary)
-            
+            Image(systemName: "info.circle").foregroundColor(.blue).font(.caption)
+            Text(getSelectionStatusMessage()).font(.caption2).foregroundColor(.secondary)
             Spacer()
         }
     }
     
-    /// 選択状態に応じた説明メッセージを取得
-    /// - Returns: 説明メッセージ
     private func getSelectionStatusMessage() -> String {
         if viewModel.rallyStage == .serving {
             return "サーブ段階では自動でサーバーが選択されます"
-        } else if selectedPlayer != nil {
-            return "選択中: \(selectedPlayer!.name)"
+        } else if let player = selectedPlayer {
+            return "選択中: \(player.name)"
         } else {
             switch viewModel.rallyStage {
-            case .receiving:
-                return "レシーブを行う選手を選択してください"
-            case .setting:
-                return "セットを行う選手を選択してください（通常はフィーダー）"
-            case .attacking:
-                return "アタックを行う選手を選択してください（通常はストライカー）"
-            default:
-                return "選手を選択してください"
+            case .receiving: return "レシーブを行う選手を選択してください"
+            case .setting: return "セットを行う選手を選択してください（通常はフィーダー）"
+            case .attacking: return "アタックを行う選手を選択してください（通常はストライカー）"
+            case .blocking: return "ブロックを行う選手を選択してください"
+            default: return "選手を選択してください"
             }
         }
     }
@@ -263,6 +249,10 @@ struct PlayerSelectionSection: View {
                     selectedPlayer = mockTeamA.players.first(where: { $0.position == .feeder })
                 case .attacking:
                     selectedPlayer = mockTeamA.players.first(where: { $0.position == .striker })
+                case .blocking:
+                    selectedPlayer = nil // ブロック時は選手選択をリセット
+                case .gameEnd:
+                    selectedPlayer = nil // ゲーム終了時は選手選択をリセット
                 }
             }
         }

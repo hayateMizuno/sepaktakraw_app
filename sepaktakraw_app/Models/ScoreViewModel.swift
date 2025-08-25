@@ -105,6 +105,11 @@ class ScoreViewModel: ObservableObject {
                 case .attacking:
                     let winnerIsTeamA = !self.isServeA
                     self.addPoint(forTeamA: winnerIsTeamA, player: player, type: type, isSuccess: isSuccess)
+                case .blocking:
+                    let winnerIsTeamA = self.isServeA // ブロック成功はサーブ側の得点
+                    self.addPoint(forTeamA: winnerIsTeamA, player: player, type: type, isSuccess: isSuccess)
+                case .gameEnd:
+                    break // ゲーム終了時は何もしない
                 }
             } else {
                 let winnerIsTeamA = (self.rallyStage == .serving) ? !self.isServeA : self.isServeA

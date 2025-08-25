@@ -368,7 +368,7 @@ struct ScoreView: View {
     // MARK: - フローチャートアクション処理
     
     private func handleServeAction(_ action: ServeAction) {
-        guard let player = selectedPlayer else { return }
+        guard selectedPlayer != nil else { return }
         
         switch action {
         case .success:
@@ -386,7 +386,7 @@ struct ScoreView: View {
     }
     
     private func handleReceiveAction(_ action: ReceiveAction) {
-        guard let player = selectedPlayer else { return }
+        guard selectedPlayer != nil else { return }
         
         switch action {
         case .success:
@@ -403,7 +403,7 @@ struct ScoreView: View {
     }
     
     private func handleSetAction(_ action: SetAction) {
-        guard let player = selectedPlayer else { return }
+        guard selectedPlayer != nil else { return }
         
         switch action {
         case .success:
@@ -421,7 +421,7 @@ struct ScoreView: View {
     }
     
     private func handleAttackAction(_ action: AttackAction) {
-        guard let player = selectedPlayer else { return }
+        guard selectedPlayer != nil else { return }
         
         selectedAttackType = action.attackType
         
@@ -448,7 +448,7 @@ struct ScoreView: View {
     }
     
     private func handleBlockAction(_ action: BlockAction) {
-        guard let player = selectedPlayer else { return }
+        guard selectedPlayer != nil else { return }
         
         switch action {
         case .blockCover:
@@ -457,13 +457,8 @@ struct ScoreView: View {
         case .blockToReceive:
             processBlockToReceive()
             
-        case .over:
-            // オーバー（ブロック失敗）
-            processRallyEvent(type: .block, isSuccess: false, reason: .over)
-            
-        case .chanceball:
-            // チャンスボール（ブロック結果）
-            processRallyEvent(type: .block, isSuccess: false, reason: .chanceBall)
+        case .over: processRallyEvent(type: .block, isSuccess: false, reason: .over)
+        case .chanceBall: processRallyEvent(type: .block, isSuccess: false, reason: .chanceBall)
         }
     }
     
@@ -695,7 +690,7 @@ struct AttackAction {
 }
 
 enum BlockAction {
-    case blockCover, blockToReceive, over, chanceButton
+    case blockCover, blockToReceive, over, chanceBall
 }
 
 // MARK: - フローチャート対応シート
@@ -878,7 +873,7 @@ struct AttackOptionsSheet: View {
     let receivingTeam: Team
     let onAttackAction: (AttackAction) -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedAttackType: StatType = .spike
+    @State private var selectedAttackType: StatType = .attack
     
     var body: some View {
         NavigationView {
@@ -1019,7 +1014,7 @@ struct BlockOptionsSheet: View {
                         title: "チャンスボール",
                         systemImage: "circle.dotted",
                         color: .purple,
-                        action: { onBlockAction(.chanceball); dismiss() }
+                        action: { onBlockAction(.chanceBall); dismiss() }
                     )
                 }
                 
