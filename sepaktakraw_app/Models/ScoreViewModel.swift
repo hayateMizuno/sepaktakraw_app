@@ -6,3 +6,218 @@
 //
 
 import Foundation
+import SwiftUI
+
+// 得点イベントのデータ構造（ViewModelファイル内で定義）
+struct ScoreEvent: Identifiable {
+    let id = UUID()
+    let scoreA: Int
+    let scoreB: Int
+    let scoringTeam: String // "A", "B", または "None"
+    let timestamp: Date
+    let playerName: String
+    let actionType: StatType
+    let isSuccess: Bool
+    let hasServeRight: Bool // サーブ権を持っているかどうか
+}
+
+//fileprivate struct GameState {
+//    let scoreA: Int, scoreB: Int, isServeA: Bool
+//}
+
+struct RallyAction {
+    let player: Player, stat: Stat, stageBeforeAction: RallyStage, previousScoreEventsCount: Int
+}
+
+enum TeamSide { case teamA, teamB }
+
+class ScoreViewModel: ObservableObject {
+    @Published var scoreA = 0
+    @Published var scoreB = 0
+    @Published var gameOutcomeMessage = ""
+    @Published var isSetFinished = false
+    @Published var isServeA: Bool
+    @Published var rallyStage: RallyStage = .serving
+    @Published var scoreEvents: [ScoreEvent] = []
+    
+    private var pointHistory: [GameState] = []
+    private var rallyActionHistory: [RallyAction] = []
+    private let initialServeIsTeamA: Bool
+    
+    init(teamAServesFirst: Bool) {
+        self.isServeA = teamAServesFirst
+        self.initialServeIsTeamA = teamAServesFirst
+        scoreEvents.append(ScoreEvent(scoreA: 0, scoreB: 0, scoringTeam: "None", timestamp: Date(), playerName: "Game Start", actionType: .serve, isSuccess: true, hasServeRight: teamAServesFirst))
+    }
+    
+    var canUndo: Bool { !rallyActionHistory.isEmpty || scoreEvents.count > 1 }
+    
+    func undo() {
+        // UIの更新を引き起こす変更を遅延させる
+        DispatchQueue.main.async { // ✨ DispatchQueue.main.async を追加
+            if !self.rallyActionHistory.isEmpty {
+                let lastAction = self.rallyActionHistory.removeLast()
+                if let lastStatIndex = lastAction.player.stats.lastIndex(where: { $0.id == lastAction.stat.id }) {
+                    lastAction.player.stats.remove(at: lastStatIndex)
+                }
+                if self.scoreEvents.count > lastAction.previousScoreEventsCount {
+                    self.scoreEvents.removeLast(self.scoreEvents.count - lastAction.previousScoreEventsCount)
+                }
+                self.rallyStage = lastAction.stageBeforeAction
+                if let lastValidEvent = self.scoreEvents.last {
+                    self.scoreA = lastValidEvent.scoreA
+                    self.scoreB = lastValidEvent.scoreB
+                    self.isServeA = lastValidEvent.hasServeRight
+                } else {
+                    self.scoreA = 0
+                    self.scoreB = 0
+                    self.isServeA = self.initialServeIsTeamA
+                    self.rallyStage = .serving
+                }
+                self.checkGameStatus()
+            } else if self.scoreEvents.count > 1 {
+                self.scoreEvents.removeLast()
+                if let lastEvent = self.scoreEvents.last {
+                    self.scoreA = lastEvent.scoreA
+                    self.scoreB = lastEvent.scoreB
+                    self.isServeA = lastEvent.hasServeRight
+                    self.rallyStage = .serving
+                }
+                self.checkGameStatus()
+            }
+        }
+    }
+
+    func processRallyEvent(player: Player, type: StatType, isSuccess: Bool, reason: FailureReason? = nil) {
+        let stat = Stat(type: type, isSuccess: isSuccess, failureReason: reason)
+        rallyActionHistory.append(RallyAction(player: player, stat: stat, stageBeforeAction: self.rallyStage, previousScoreEventsCount: scoreEvents.count))
+        
+        let currentScoringTeamName = isServeA ? "A" : "B"
+        scoreEvents.append(ScoreEvent(scoreA: scoreA, scoreB: scoreB, scoringTeam: currentScoringTeamName, timestamp: Date(), playerName: player.name, actionType: type, isSuccess: isSuccess, hasServeRight: isServeA))
+        
+        // UIの更新を遅延させる
+        DispatchQueue.main.async { // ✨ DispatchQueue.main.async を追加
+            if isSuccess {
+                switch self.rallyStage {
+                case .serving: self.rallyStage = .receiving
+                case .receiving: self.rallyStage = .setting
+                case .setting: self.rallyStage = .attacking
+                case .attacking:
+                    let winnerIsTeamA = !self.isServeA
+                    self.addPoint(forTeamA: winnerIsTeamA, player: player, type: type, isSuccess: isSuccess)
+                }
+            } else {
+                let winnerIsTeamA = (self.rallyStage == .serving) ? !self.isServeA : self.isServeA
+                self.addPoint(forTeamA: winnerIsTeamA, player: player, type: type, isSuccess: isSuccess)
+            }
+        }
+    }
+    
+    func processAttackReceived(player: Player, originalStat: Stat) {
+        rallyActionHistory.append(RallyAction(player: player, stat: originalStat, stageBeforeAction: self.rallyStage, previousScoreEventsCount: scoreEvents.count))
+        
+        let currentScoringTeamName = isServeA ? "A" : "B"
+        scoreEvents.append(ScoreEvent(scoreA: scoreA, scoreB: scoreB, scoringTeam: currentScoringTeamName, timestamp: Date(), playerName: player.name, actionType: originalStat.type, isSuccess: originalStat.isSuccess, hasServeRight: isServeA))
+        
+        // UIの更新を遅延させる
+        DispatchQueue.main.async { // ✨ DispatchQueue.main.async を追加
+            self.isServeA.toggle()
+            self.rallyStage = .receiving
+        }
+    }
+    
+    func processSetFailure(player: Player, reason: FailureReason) {
+        let stat = Stat(type: .setting, isSuccess: false, failureReason: reason)
+        rallyActionHistory.append(RallyAction(player: player, stat: stat, stageBeforeAction: self.rallyStage, previousScoreEventsCount: scoreEvents.count))
+        
+        let currentScoringTeamName = isServeA ? "A" : "B"
+        scoreEvents.append(ScoreEvent(scoreA: scoreA, scoreB: scoreB, scoringTeam: currentScoringTeamName, timestamp: Date(), playerName: player.name, actionType: .setting, isSuccess: false, hasServeRight: isServeA))
+        
+        // UIの更新を遅延させる
+        DispatchQueue.main.async { // ✨ DispatchQueue.main.async を追加
+            self.isServeA.toggle()
+            self.rallyStage = .attacking
+        }
+    }
+    
+    func processBlockCover(player: Player, originalStat: Stat) {
+        rallyActionHistory.append(RallyAction(player: player, stat: originalStat, stageBeforeAction: self.rallyStage, previousScoreEventsCount: scoreEvents.count))
+        
+        let currentScoringTeamName = isServeA ? "A" : "B"
+        scoreEvents.append(ScoreEvent(scoreA: scoreA, scoreB: scoreB, scoringTeam: currentScoringTeamName, timestamp: Date(), playerName: player.name, actionType: originalStat.type, isSuccess: originalStat.isSuccess, hasServeRight: isServeA))
+        
+        // UIの更新を遅延させる
+        DispatchQueue.main.async { // ✨ DispatchQueue.main.async を追加
+            self.rallyStage = .receiving
+        }
+    }
+
+    func processBlockCounterAttack(player: Player, originalStat: Stat) {
+        rallyActionHistory.append(RallyAction(player: player, stat: originalStat, stageBeforeAction: self.rallyStage, previousScoreEventsCount: scoreEvents.count))
+        
+        let currentScoringTeamName = isServeA ? "A" : "B"
+        scoreEvents.append(ScoreEvent(scoreA: scoreA, scoreB: scoreB, scoringTeam: currentScoringTeamName, timestamp: Date(), playerName: player.name, actionType: originalStat.type, isSuccess: originalStat.isSuccess, hasServeRight: isServeA))
+        
+        // UIの更新を遅延させる
+        DispatchQueue.main.async { // ✨ DispatchQueue.main.async を追加
+            self.isServeA.toggle()
+            self.rallyStage = .attacking
+        }
+    }
+    
+    func addPoint(forTeamA: Bool, player: Player, type: StatType, isSuccess: Bool) {
+        // スコアを直接更新し、その後にイベントを追加
+        if forTeamA { scoreA += 1 } else { scoreB += 1 }
+        
+        let scoringTeamName = forTeamA ? "A" : "B"
+        
+        // scoreEventsに得点イベントを追加
+        scoreEvents.append(ScoreEvent(scoreA: scoreA, scoreB: scoreB, scoringTeam: scoringTeamName, timestamp: Date(), playerName: player.name, actionType: type, isSuccess: isSuccess, hasServeRight: isServeA))
+        
+        // UIの更新（rallyStageとisServeA）を遅延させる
+        DispatchQueue.main.async { // ✨ DispatchQueue.main.async を追加
+            self.isServeA.toggle()
+            self.rallyStage = .serving
+            self.rallyActionHistory.removeAll()
+            self.checkGameStatus()
+        }
+    }
+    
+    func resetGame() {
+        // UIの更新を遅延させる
+        DispatchQueue.main.async { // ✨ DispatchQueue.main.async を追加
+            self.scoreA = 0
+            self.scoreB = 0
+            self.isServeA = self.initialServeIsTeamA
+            self.gameOutcomeMessage = ""
+            self.isSetFinished = false
+            self.scoreEvents.removeAll()
+            self.scoreEvents.append(ScoreEvent(scoreA: 0, scoreB: 0, scoringTeam: "None", timestamp: Date(), playerName: "Game Start", actionType: .serve, isSuccess: true, hasServeRight: self.initialServeIsTeamA))
+            self.pointHistory.removeAll()
+            self.rallyActionHistory.removeAll()
+            self.rallyStage = .serving
+        }
+    }
+
+    func checkGameStatus() {
+        // この関数は@PublishedであるgameOutcomeMessageとisSetFinishedを設定します。
+        // もしこれが@Publishedプロパティの変更内から呼び出される場合、警告の原因になる可能性があります。
+        // ただし、通常は遅延された更新チェーンの最後に呼び出されるため安全です。
+        // 警告が続く場合は、この処理も遅延させる必要があるかもしれません。
+        self.isSetFinished = false
+        if (scoreA == 15 && scoreB < 14) || scoreA == 17 {
+            self.gameOutcomeMessage = "Team A WINS!"; self.isSetFinished = true; return
+        }
+        if (scoreB == 15 && scoreA < 14) || scoreB == 17 {
+            self.gameOutcomeMessage = "Team B WINS!"; self.isSetFinished = true; return
+        }
+        if scoreA >= 14 && scoreB >= 14 {
+            if scoreA == scoreB { self.gameOutcomeMessage = "Deuce! First to 17 wins!" }
+            else if scoreA == 16 { self.gameOutcomeMessage = "Team A Set Point!" }
+            else if scoreB == 16 { self.gameOutcomeMessage = "Team B Set Point!" }
+            else { self.gameOutcomeMessage = "Deuce! First to 17 wins!" }
+        } else if scoreA == 14 { self.gameOutcomeMessage = "Team A Set Point!" }
+        else if scoreB == 14 { self.gameOutcomeMessage = "Team B Set Point!" }
+        else { self.gameOutcomeMessage = "" }
+    }
+}
