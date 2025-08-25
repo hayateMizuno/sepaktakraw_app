@@ -196,4 +196,6 @@ enum StatType: String, Codable, CaseIterable {
     case receive
     case setting
     case heading
+    case rollspike
+    case sunbackspike
 }

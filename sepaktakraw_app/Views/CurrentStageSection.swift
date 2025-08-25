@@ -28,6 +28,8 @@ struct CurrentStageSection: View {
         case .receiving: return "\(teamName) のレシーブ"
         case .setting: return "\(teamName) のトス"
         case .attacking: return "\(teamName) のアタック"
+        case .blocking: return "\(teamName) のブロック"
+        case .gameEnd: return "ゲーム終了"
         }
     }
 

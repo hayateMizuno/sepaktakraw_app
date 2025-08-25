@@ -893,9 +893,9 @@ struct AttackOptionsSheet: View {
                         .font(.headline)
                     
                     Picker("Attack Type", selection: $selectedAttackType) {
-                        Text("スパイク").tag(StatType.spike)
-                        Text("ロールスパイク").tag(StatType.rollSpike)
-                        Text("フェイント").tag(StatType.feint)
+                        Text("ローリング").tag(StatType.rollspike)
+                        Text("シザース").tag(StatType.sunbackspike)
+                        Text("フェイント").tag(StatType.attack_feint)
                     }
                     .pickerStyle(SegmentedPickerStyle())
                 }
@@ -1165,148 +1165,6 @@ struct ActionButton: View {
     }
 }
 
-// MARK: - Missing Component Placeholders
-
-// これらのコンポーネントは既存のコードから参照されているため、プレースホルダーとして追加
-struct ScoreDisplaySection: View {
-    let viewModel: ScoreViewModel
-    let teamA: Team
-    let teamB: Team
-    
-    var body: some View {
-        VStack {
-            HStack {
-                VStack {
-                    Text(teamA.name)
-                        .font(.headline)
-                    Text("\(viewModel.scoreA)")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                }
-                .foregroundColor(teamA.color)
-                
-                Spacer()
-                
-                Text(":")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-                
-                Spacer()
-                
-                VStack {
-                    Text(teamB.name)
-                        .font(.headline)
-                    Text("\(viewModel.scoreB)")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                }
-                .foregroundColor(teamB.color)
-            }
-            .padding()
-            .background(Color.gray.opacity(0.1))
-            .cornerRadius(12)
-        }
-    }
-}
-
-struct ScoreTimelineView: View {
-    let teamA: Team
-    let teamB: Team
-    let scoreEvents: [ScoreEvent]
-    
-    var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(scoreEvents.suffix(10), id: \.id) { event in
-                    VStack(spacing: 2) {
-                        Text("\(event.scoreA):\(event.scoreB)")
-                            .font(.caption2)
-                            .fontWeight(.bold)
-                        
-                        Text(event.playerName)
-                            .font(.caption2)
-                            .lineLimit(1)
-                            .foregroundColor(event.scoringTeam == "A" ? teamA.color : teamB.color)
-                    }
-                    .padding(4)
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(6)
-                }
-            }
-            .padding(.horizontal)
-        }
-    }
-}
-
-struct CurrentStageSection: View {
-    let rallyStage: RallyStage
-    let currentActionTeam: Team
-    let currentTeamColor: Color
-    
-    var body: some View {
-        VStack {
-            Text("現在の段階: \(stageDescription)")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundColor(currentTeamColor)
-            
-            Text("アクションチーム: \(currentActionTeam.name)")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-        }
-        .padding(8)
-        .background(currentTeamColor.opacity(0.1))
-        .cornerRadius(8)
-    }
-    
-    private var stageDescription: String {
-        switch rallyStage {
-        case .serving: return "サーブ"
-        case .receiving: return "レシーブ"
-        case .setting: return "セット"
-        case .attacking: return "アタック"
-        case .blocking: return "ブロック"
-        case .gameEnd: return "ゲーム終了"
-        }
-    }
-}
-
-struct PlayerSelectionSection: View {
-    let viewModel: ScoreViewModel
-    @Binding var selectedPlayer: Player?
-    let currentActionTeam: Team
-    let currentTeamColor: Color
-    
-    var body: some View {
-        VStack(spacing: 8) {
-            Text("選手選択")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundColor(.secondary)
-            
-            HStack(spacing: 8) {
-                ForEach(currentActionTeam.players, id: \.id) { player in
-                    PlayerSelectionButton(
-                        player: player,
-                        positionName: positionDisplayName(player.position),
-                        selectionColor: currentTeamColor,
-                        isSelected: selectedPlayer?.id == player.id,
-                        isSelectable: true,
-                        action: { selectedPlayer = player }
-                    )
-                }
-            }
-        }
-    }
-    
-    private func positionDisplayName(_ position: Position) -> String {
-        switch position {
-        case .tekong: return "テコン"
-        case .feeder: return "フィーダー"
-        case .striker: return "ストライカー"
-        }
-    }
-}
 
 // MARK: - Preview
 
