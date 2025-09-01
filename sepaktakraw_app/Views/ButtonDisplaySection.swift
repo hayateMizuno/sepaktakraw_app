@@ -354,15 +354,16 @@ struct ButtonDisplaySection: View {
 #Preview {
     @MainActor
     struct ButtonDisplaySectionPreview: View {
+        private static let previewMatchID = UUID()
+
         @StateObject var mockViewModel: ScoreViewModel = {
-            let vm = ScoreViewModel(teamAServesFirst: true)
-            vm.rallyStage = .attacking // プレビュー用のステージ設定
+            let vm = ScoreViewModel(teamAServesFirst: true, matchID: previewMatchID)
+            vm.rallyStage = .attacking
             vm.scoreA = 10
             vm.scoreB = 8
             return vm
         }()
 
-        // プレビュー用の状態変数
         @State var recordedOutcomeIsSuccess: Bool = true
         @State var isChoosingAttackOutcome: Bool = false
         @State var isChoosingBlockOutcome: Bool = false
@@ -370,7 +371,8 @@ struct ButtonDisplaySection: View {
         @State var isDetailSelectionActive: Bool = false
         @State var selectedPlayer: Player? = {
             let mockTeam = Team(name: "Test Team", color: .blue)
-            return Player(name: "Test Striker", position: .striker, team: mockTeam)
+            // ✨ エラー修正: dominantFoot を追加
+            return Player(name: "Test Striker", position: .striker, dominantFoot: .right, team: mockTeam)
         }()
 
         var body: some View {
@@ -384,22 +386,13 @@ struct ButtonDisplaySection: View {
                     isDetailSelectionActive: $isDetailSelectionActive,
                     selectedPlayer: $selectedPlayer,
                     viewModel: mockViewModel,
-                    // アクションクロージャ（プレビュー用のログ出力）
                     processRallyEventAction: { type, isSuccess, reason in
                         print("🎯 Rally Event: \(type), Success: \(isSuccess), Reason: \(reason?.rawValue ?? "none")")
                     },
-                    processAttackReceivedAction: {
-                        print("🏐 Attack Received")
-                    },
-                    processSetFailureWithReceiveAction: { reason in
-                        print("🔄 Set Failure with Receive: \(reason.rawValue)")
-                    },
-                    processBlockCoverAction: {
-                        print("🛡️ Block Cover")
-                    },
-                    processBlockToReceiveAction: {
-                        print("🔄 Block to Receive")
-                    }
+                    processAttackReceivedAction: { print("🏐 Attack Received") },
+                    processSetFailureWithReceiveAction: { reason in print("🔄 Set Failure with Receive: \(reason.rawValue)") },
+                    processBlockCoverAction: { print("🛡️ Block Cover") },
+                    processBlockToReceiveAction: { print("🔄 Block to Receive") }
                 )
                 .padding()
             }

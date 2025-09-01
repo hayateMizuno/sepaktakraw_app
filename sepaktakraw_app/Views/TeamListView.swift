@@ -8,79 +8,78 @@ import SwiftData
 
 struct TeamListView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query private var teams: [Team]
+    @Query(filter: #Predicate<Team> { !$0.isBotTeam }, sort: \Team.name) private var userTeams: [Team]
+    @Query(filter: #Predicate<Team> { $0.isBotTeam }) private var botTeamQuery: [Team]
+    
+    private var botTeam: Team? { botTeamQuery.first }
 
     @State private var teamToDelete: Team?
     @State private var isShowingDeleteAlert = false
     @State private var isShowingAddTeamSheet = false
     @State private var newTeamName = ""
     @State private var selectedColor: Color = .red
-    @State private var selectedTeam: Team? = nil // This holds the Team whose color is being edited
-
-    // State to hold the color *currently selected in the ColorPicker*
-    @State private var colorBeingEdited: Color = .red // Initialize with a default color
 
     var body: some View {
         NavigationStack {
             List {
-                ForEach(teams) { team in
-                    HStack {
-                        Text(team.name)
-                            .padding(6)
-                            .background(team.color)
-                            .cornerRadius(8)
-                            .foregroundColor(.white)
-                            .onTapGesture {
-                                selectedTeam = team // Assign the team to open the sheet
-                                colorBeingEdited = team.color // Initialize colorBeingEdited with team's current color
-                            }
-                        
-                        Spacer()
+                if let botTeam = botTeam {
+                    Section(header: Text("BOT")) {
+                        HStack {
+                            Circle().fill(botTeam.color).frame(width: 20, height: 20)
+                            Text(botTeam.name)
+                            Spacer()
+                            Image(systemName: "lock.fill").foregroundColor(.secondary)
+                        }
                     }
                 }
-                .onDelete(perform: askToDelete)
-            }
-            .sheet(item: $selectedTeam) { team in // 'team' here is a let constant
-                TeamColorEditSheet(team: team, colorBeingEdited: $colorBeingEdited) { updatedColor in
-                    // This closure is called when the sheet signals a color update
-                    team.color = updatedColor // Apply the changes to the SwiftData model
-                    try? modelContext.save() // Save context after update
+                
+                Section(header: Text("マイチーム")) {
+                    ForEach(userTeams) { team in
+                        NavigationLink(destination: PlayerListView(team: team)) {
+                            HStack {
+                                Circle().fill(team.color).frame(width: 20, height: 20)
+                                Text(team.name)
+                            }
+                        }
+                    }
+                    .onDelete(perform: askToDelete)
                 }
             }
-            
-            .navigationTitle("チーム一覧")
+            .navigationTitle("チーム・選手登録")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { isShowingAddTeamSheet = true }) {
+                    Button(action: {
+                        isShowingAddTeamSheet = true
+                    }) {
                         Image(systemName: "plus")
                     }
                 }
             }
-            .sheet(isPresented: $isShowingAddTeamSheet) {
-                AddTeamSheet(
-                    newTeamName: $newTeamName,
-                    selectedColor: $selectedColor,
-                    addTeamAction: addTeam,
-                    dismissAction: {
-                        isShowingAddTeamSheet = false
-                        newTeamName = ""
-                    }
-                )
-            }
             .alert("チームを削除", isPresented: $isShowingDeleteAlert, presenting: teamToDelete) { team in
-                Button("削除", role: .destructive) {
-                    delete(team)
-                }
+                Button("削除", role: .destructive) { delete(team) }
                 Button("キャンセル", role: .cancel) {}
             } message: { team in
                 Text("「\(team.name)」を削除しますか？所属する全ての選手データも削除され、この操作は元に戻せません。")
             }
         }
+        // ✨ 修正: .sheetモディファイアをNavigationStackの末尾に移動
+        .sheet(isPresented: $isShowingAddTeamSheet) {
+            AddTeamSheet(
+                newTeamName: $newTeamName,
+                selectedColor: $selectedColor,
+                addTeamAction: addTeam,
+                dismissAction: {
+                    isShowingAddTeamSheet = false
+                    newTeamName = ""
+                    selectedColor = .red
+                }
+            )
+        }
     }
     
     private func askToDelete(at offsets: IndexSet) {
         if let first = offsets.first {
-            teamToDelete = teams[first]
+            teamToDelete = userTeams[first]
             isShowingDeleteAlert = true
         }
     }
@@ -91,16 +90,15 @@ struct TeamListView: View {
     
     private func addTeam() {
         guard !newTeamName.isEmpty else { return }
-        let newTeam = Team(name: newTeamName)
-        newTeam.color = selectedColor
+        let newTeam = Team(name: newTeamName, color: selectedColor, isBotTeam: false)
         modelContext.insert(newTeam)
+        // ✨ 追加: 変更を明示的に保存し、処理をより確実にする
+        try? modelContext.save()
         newTeamName = ""
     }
 }
 
-// MARK: - Helper Views for Sheets
-
-// チーム追加用のシートを新しい構造体として切り出す
+/// チーム追加用のシート
 struct AddTeamSheet: View {
     @Binding var newTeamName: String
     @Binding var selectedColor: Color
@@ -108,59 +106,27 @@ struct AddTeamSheet: View {
     let dismissAction: () -> Void
 
     var body: some View {
-        VStack(spacing: 16) {
-            TextField("チーム名", text: $newTeamName)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-                .padding(.horizontal)
-            
-            ColorPicker("チームカラー", selection: $selectedColor)
-                .padding(.horizontal)
-            
-            HStack {
-                Button("キャンセル", action: dismissAction)
-                    .buttonStyle(.bordered)
-                
-                Spacer()
-                
-                Button("追加") {
-                    addTeamAction()
-                    dismissAction()
+        NavigationStack {
+            Form {
+                Section(header: Text("チーム情報")) {
+                    TextField("チーム名", text: $newTeamName)
+                    ColorPicker("チームカラー", selection: $selectedColor)
                 }
-                .buttonStyle(.borderedProminent)
             }
-            .padding(.horizontal)
-        }
-        .padding()
-    }
-}
-
-// チームの色編集用のシートを新しい構造体として切り出す
-struct TeamColorEditSheet: View {
-    // Teamオブジェクト自体を直接受け取る (SwiftDataは変更を自動追跡)
-    @Bindable var team: Team // Use @Bindable for direct modification in SwiftData
-    @Binding var colorBeingEdited: Color // To control the ColorPicker's selection
-    @Environment(\.dismiss) var dismiss // To dismiss the sheet
-    
-    // Closure to communicate the updated color back to TeamListView
-    let onColorUpdate: (Color) -> Void
-
-    var body: some View {
-        VStack(spacing: 20) {
-            Text("チームの色を変更")
-                .font(.headline)
-            
-            ColorPicker("色を選択", selection: $colorBeingEdited) // Bind to the @State variable
-                .padding()
-            
-            Button("完了") {
-                onColorUpdate(colorBeingEdited) // Pass the final color back
-                dismiss() // Dismiss the sheet
+            .navigationTitle("新しいチームを追加")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("キャンセル", action: dismissAction)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("追加") {
+                        addTeamAction()
+                        dismissAction()
+                    }
+                    .disabled(newTeamName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
             }
-            .buttonStyle(.borderedProminent)
-        }
-        .padding()
-        .onAppear {
-            colorBeingEdited = team.color // Initialize the @State variable when sheet appears
         }
     }
 }

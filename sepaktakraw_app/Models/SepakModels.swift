@@ -9,6 +9,25 @@ import Foundation
 import SwiftData
 import SwiftUI
 
+
+// 利き足
+enum DominantFoot: String, Codable, CaseIterable {
+    case right = "右足"
+    case left = "左足"
+}
+
+// アタッカーの得意なアタック
+enum AttackType: String, Codable, CaseIterable {
+    case rolling = "ローリング"
+    case sunback = "シザース"
+}
+
+// サーバーの得意なサーブ
+enum ServerType: String, Codable, CaseIterable {
+    case inside = "インサイド"
+    case instep = "インステップ"
+}
+
 //失敗の理由
 enum FailureReason: String, Codable, CaseIterable {
     case out // アウト
@@ -36,31 +55,30 @@ struct Stat: Codable, Identifiable {
 class Team {
     var id: UUID
     var name: String
-    // ColorをRGBAの各コンポーネントに分解して保存
     var red: Double
     var green: Double
     var blue: Double
-    var opacity: Double // alpha値
+    var opacity: Double
+    
+    // ✨ 修正: Botチームかどうかを識別するフラグを追加
+    var isBotTeam: Bool
     
     @Relationship(deleteRule: .cascade, inverse: \Player.team)
     var players: [Player] = []
-
-    init(name: String, color: Color = .red) {
+    
+    init(name: String, color: Color = .red, isBotTeam: Bool = false) {
         self.id = UUID()
         self.name = name
-        // ColorからRGBAコンポーネントを抽出（修正版）
         let resolvedColor = color.resolve(in: EnvironmentValues())
         self.red = Double(resolvedColor.red)
         self.green = Double(resolvedColor.green)
         self.blue = Double(resolvedColor.blue)
         self.opacity = Double(resolvedColor.opacity)
+        self.isBotTeam = isBotTeam
     }
     
-    // 計算プロパティとしてColorを公開（修正版）
     var color: Color {
-        get {
-            Color(red: red, green: green, blue: blue, opacity: opacity)
-        }
+        get { Color(red: red, green: green, blue: blue, opacity: opacity) }
         set {
             let resolvedColor = newValue.resolve(in: EnvironmentValues())
             self.red = Double(resolvedColor.red)
@@ -78,8 +96,14 @@ class Player {
     var name: String
     var position: Position
     var team: Team? // どのチームに所属しているか
+    var dominantFoot: DominantFoot
+    var attackType: AttackType? // アタッカーのみ
+    var serverType: ServerType?   // サーバーのみ
     // SwiftDataでStatを直接保存するためのプロパティ（修正版）
     var statsData: Data = Data()
+    
+    // ✨ 追加: Bot選手かどうかを識別するフラグ
+    var isBotPlayer: Bool = false
     
     // 計算プロパティでStatsを管理
     var stats: [Stat] {
@@ -99,13 +123,18 @@ class Player {
                 print("Error encoding stats: \(error)")
             }
         }
+        
     }
     
-    init(name: String, position: Position, team: Team? = nil) {
+    init(name: String, position: Position, dominantFoot: DominantFoot, team: Team? = nil, attackType: AttackType? = nil, serverType: ServerType? = nil, isBotPlayer: Bool = false) {
         self.id = UUID()
         self.name = name
         self.position = position
+        self.dominantFoot = dominantFoot
         self.team = team
+        self.attackType = attackType
+        self.serverType = serverType
+        self.isBotPlayer = isBotPlayer
     }
     
     /// 統計を追加する便利メソッド
@@ -147,7 +176,15 @@ class Match {
     var scoreA: Int
     var scoreB: Int
     var teamAServesFirst: Bool // チームAが最初にサーブしたかどうか
-    // 必要に応じて、試合結果やセット数などのプロパティを追加
+    // ✨ 追加: 同じチームの場合の区別用サフィックス
+    var teamASuffix: String?
+    var teamBSuffix: String?
+    // 試合に参加した選手を保存するためのリレーションシップ
+    @Relationship(deleteRule: .nullify)
+    var participatingPlayersA: [Player] = []
+    
+    @Relationship(deleteRule: .nullify)
+    var participatingPlayersB: [Player] = []
     
     init(date: Date, teamA: Team?, teamB: Team?, teamAServesFirst: Bool) {
         self.id = UUID()
@@ -157,6 +194,8 @@ class Match {
         self.scoreA = 0
         self.scoreB = 0
         self.teamAServesFirst = teamAServesFirst
+        self.teamASuffix = teamASuffix
+        self.teamBSuffix = teamBSuffix
     }
 }
 

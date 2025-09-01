@@ -15,30 +15,31 @@
 import SwiftUI
 
 struct CurrentStageSection: View {
-    let rallyStage: RallyStage // RallyStageはScoreViewから渡される
-    let currentActionTeam: Team? // 現在アクションを行うチームもScoreViewから渡される
-    let currentTeamColor: Color // 現在のチームカラーもScoreViewから渡される
-
-    /// 現在の状況を説明するテキスト
-    private var currentStageDescription: String {
-        guard let team = currentActionTeam else { return "チーム情報なし" }
-        let teamName = team.name
+    let rallyStage: RallyStage
+    let currentActionTeam: Team?
+    let currentTeamColor: Color
+    
+    private var description: String {
+        guard let team = currentActionTeam else { return "..." }
         switch rallyStage {
-        case .serving: return "\(teamName) のサーブ"
-        case .receiving: return "\(teamName) のレシーブ"
-        case .setting: return "\(teamName) のトス"
-        case .attacking: return "\(teamName) のアタック"
-        case .blocking: return "\(teamName) のブロック"
+        case .serving: return "\(team.name) のサーブ"
+        case .receiving: return "\(team.name) のレシーブ"
+        case .setting: return "\(team.name) のセット"
+        case .attacking: return "\(team.name) のアタック"
+        case .blocking: return "\(team.name) のブロック"
         case .gameEnd: return "ゲーム終了"
         }
     }
-
+    
     var body: some View {
-        Text(currentStageDescription)
-            .font(.title2)
-            .padding()
-            .background(currentTeamColor.opacity(0.2))
-            .cornerRadius(10)
+        Text(description)
+            .font(.headline)
+            .fontWeight(.semibold)
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(currentTeamColor.opacity(0.15))
+            .cornerRadius(8)
     }
 }
 

@@ -43,6 +43,7 @@ struct ScoreView: View {
     
     @StateObject private var viewModel: ScoreViewModel
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.presentationMode) var presentationMode // 戻る処理用
     @State private var isShowingResetAlert = false
     @State private var isShowingRallyChangeAlert = false
     @Bindable var selectedMatch: Match
@@ -57,261 +58,240 @@ struct ScoreView: View {
     
     init(match: Match) {
         _selectedMatch = Bindable(wrappedValue: match)
-        _viewModel = StateObject(wrappedValue: ScoreViewModel(teamAServesFirst: match.teamAServesFirst))
+        // ✨ 修正: ViewModelの初期化時にmatchIDを渡す
+        _viewModel = StateObject(wrappedValue: ScoreViewModel(teamAServesFirst: match.teamAServesFirst, matchID: match.id))
     }
     
     // MARK: - Computed Properties
     
-    private var teamA: Team {
-        guard let team = selectedMatch.teamA else {
-            fatalError("Team A is nil in selected match. Match data may be corrupted.")
-        }
+    private var teamAInfo: Team {
+        guard let team = selectedMatch.teamA else { fatalError("Team A is nil in selected match.") }
         return team
     }
     
-    private var teamB: Team {
-        guard let team = selectedMatch.teamB else {
-            fatalError("Team B is nil in selected match. Match data may be corrupted.")
-        }
+    private var teamBInfo: Team {
+        guard let team = selectedMatch.teamB else { fatalError("Team B is nil in selected match.") }
         return team
     }
     
-    private var servingTeam: Team { viewModel.isServeA ? teamA : teamB }
-    private var receivingTeam: Team { viewModel.isServeA ? teamB : teamA }
+    private var playersA: [Player] { selectedMatch.participatingPlayersA }
+    private var playersB: [Player] { selectedMatch.participatingPlayersB }
     
-    private var currentActionTeam: Team {
+    private var servingTeamInfo: Team { viewModel.isServeA ? teamAInfo : teamBInfo }
+    private var servingTeamPlayers: [Player] { viewModel.isServeA ? playersA : playersB }
+    
+    private var receivingTeamInfo: Team { viewModel.isServeA ? teamBInfo : teamAInfo }
+    private var receivingTeamPlayers: [Player] { viewModel.isServeA ? playersB : playersA }
+    
+    private var currentActionTeamInfo: Team {
         switch rallyStage {
-        case .serving:
-            return servingTeam
-        case .receiving, .setting, .attacking:
-            // ラリーフローが反転されている場合は逆のチーム
-            return viewModel.rallyFlowReversed ? servingTeam : receivingTeam
-        case .blocking:
-            // ブロック段階では元々のサーブチーム
-            return viewModel.rallyFlowReversed ? receivingTeam : servingTeam
-        case .gameEnd:
-            return servingTeam
+        case .serving: return servingTeamInfo
+        case .receiving, .setting, .attacking: return viewModel.rallyFlowReversed ? servingTeamInfo : receivingTeamInfo
+        case .blocking: return viewModel.rallyFlowReversed ? receivingTeamInfo : servingTeamInfo
+        case .gameEnd: return servingTeamInfo
         }
     }
     
-    private var currentTeamColor: Color { currentActionTeam.color }
+    private var currentActionTeamPlayers: [Player] {
+        switch rallyStage {
+        case .serving: return servingTeamPlayers
+        case .receiving, .setting, .attacking: return viewModel.rallyFlowReversed ? servingTeamPlayers : receivingTeamPlayers
+        case .blocking: return viewModel.rallyFlowReversed ? receivingTeamPlayers : servingTeamPlayers
+        case .gameEnd: return servingTeamPlayers
+        }
+    }
+    
+    private var currentTeamColor: Color { currentActionTeamInfo.color }
     private var rallyStage: RallyStage { viewModel.rallyStage }
     
-    // ラリー変更ボタンが表示可能かどうか
     private var canChangeRally: Bool {
         return rallyStage == .receiving || rallyStage == .setting || rallyStage == .attacking
     }
-
+    
     // MARK: - Body
     
     var body: some View {
-        NavigationStack {
-            GeometryReader { geometry in
-                let isLandscape = geometry.size.width > geometry.size.height
-                let isCompact = geometry.size.width < 700
-                
-                if isLandscape && !isCompact {
-                    landscapeLayout
-                } else {
-                    portraitLayout(geometry: geometry)
+        GeometryReader { geometry in
+            let isLandscape = geometry.size.width > geometry.size.height
+            let isCompact = geometry.size.width < 700
+            
+            if isLandscape && !isCompact {
+                landscapeLayout
+            } else {
+                portraitLayout(geometry: geometry)
+            }
+        }
+        .navigationTitle("Rally Scorer")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true) // 標準の戻るボタンを非表示
+        .onAppear { autoSelectPlayer(for: rallyStage) }
+        .onChange(of: rallyStage) { _, newStage in autoSelectPlayer(for: newStage) }
+        .onChange(of: viewModel.isServeA) { _, _ in if rallyStage == .serving { autoSelectPlayer(for: .serving) } }
+        .toolbar {
+            // ✨ 追加: カスタムの「戻る」ボタンを配置
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button(action: {
+                    presentationMode.wrappedValue.dismiss()
+                }) {
+                    Image(systemName: "chevron.left")
+                    Text("試合設定")
                 }
             }
-            .navigationTitle("Rally Scorer")
-            .navigationBarTitleDisplayMode(.inline)
-            .onAppear {
-                autoSelectPlayer(for: rallyStage)
-            }
-            .onChange(of: rallyStage) { _, newStage in
-                DispatchQueue.main.async {
-                    autoSelectPlayer(for: newStage)
-                    detailSelectionState = .none
-                }
-            }
-            .onChange(of: viewModel.isServeA) { _, newIsServeA in
-                if rallyStage == .serving {
-                    DispatchQueue.main.async {
-                        autoSelectPlayer(for: .serving)
-                    }
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 12) {
-                        // ラリー変更ボタン
-                        if canChangeRally {
-                            Button(action: {
-                                isShowingRallyChangeAlert = true
-                            }) {
-                                Image(systemName: "arrow.left.arrow.right.circle")
-                                    .foregroundColor(.orange)
-                            }
-                        }
-                        
-                        Button(action: {
-                            viewModel.undo()
-                            autoSelectPlayer(for: viewModel.rallyStage)
-                            detailSelectionState = .none
-                        }) {
-                            Image(systemName: "arrow.uturn.backward")
-                        }
-                        .disabled(!viewModel.canUndo)
-                        
-                        Button(action: {
-                            isShowingResetAlert = true
-                        }) {
-                            Image(systemName: "arrow.clockwise")
+            ToolbarItem(placement: .navigationBarTrailing) {
+                HStack(spacing: 12) {
+                    if canChangeRally {
+                        Button(action: { isShowingRallyChangeAlert = true }) {
+                            Image(systemName: "arrow.left.arrow.right.circle").foregroundColor(.orange)
                         }
                     }
-                }
-            }
-            .alert("リセット確認", isPresented: $isShowingResetAlert) {
-                Button("リセット", role: .destructive) {
-                    viewModel.resetGame()
-                    DispatchQueue.main.async {
+                    Button(action: {
+                        viewModel.undo()
                         autoSelectPlayer(for: viewModel.rallyStage)
                         detailSelectionState = .none
+                    }) {
+                        Image(systemName: "arrow.uturn.backward")
+                    }.disabled(!viewModel.canUndo)
+                    
+                    Button(action: { isShowingResetAlert = true }) {
+                        Image(systemName: "arrow.clockwise")
                     }
                 }
-                Button("キャンセル", role: .cancel) {}
-            } message: {
-                Text("本当にゲームをリセットしますか？この操作は元に戻せません。")
             }
-            .alert("ラリー変更確認", isPresented: $isShowingRallyChangeAlert) {
-                Button("変更", role: .destructive) {
-                    switchServeAndReceive()
-                }
-                Button("キャンセル", role: .cancel) {}
-            } message: {
-                Text("攻守を交代してラリーを継続しますか？\n（\(currentActionTeam.name) → \(currentActionTeam == teamA ? teamB.name : teamA.name)）")
+        }
+        .alert("リセット確認", isPresented: $isShowingResetAlert) {
+            Button("リセット", role: .destructive) {
+                viewModel.resetGame()
+                autoSelectPlayer(for: viewModel.rallyStage)
+                detailSelectionState = .none
             }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            Text("本当にゲームをリセットしますか？この操作は元に戻せません。")
+        }
+        .alert("ラリー変更確認", isPresented: $isShowingRallyChangeAlert) {
+            Button("変更", role: .destructive) {
+                switchServeAndReceive()
+            }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            Text("攻守を交代してラリーを継続しますか？\n（\(currentActionTeamInfo.name) → \(currentActionTeamInfo.id == teamAInfo.id ? teamBInfo.name : teamAInfo.name)）")
         }
     }
     
     // MARK: - Layout Views
-        
-        @ViewBuilder
-        private var landscapeLayout: some View {
-            HStack(spacing: 16) {
-                VStack(spacing: 12) {
-                    scoreSection
-                        .frame(height: 200)
-                    
-                    timelineSection
-                        .frame(height: 120)
-                    
-                    Spacer()
-                }
-                .frame(maxWidth: 400)
-                
-                VStack(spacing: 16) {
-                    currentStageSection
-                        .frame(maxHeight: 80)
-                    
-                    playerSelectionSection
-                        .frame(height: 160)
-                    
-                    // ラリー変更ボタンセクション（ランドスケープ用）
-                    if canChangeRally {
-                        rallyChangeSection
-                            .frame(height: 50)
-                    }
-                    
-                    // スペーサーを追加してアクション選択を下に押し下げ
-                    Spacer()
-                    
-                    inlineActionSelectionSection
-                        .frame(height: 140)
-                    
-                    Spacer(minLength: 20)
-                }
-                .frame(maxWidth: .infinity)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 16)
-        }
-        
-        @ViewBuilder
-        private func portraitLayout(geometry: GeometryProxy) -> some View {
-            let availableHeight = geometry.size.height - 100 // ナビゲーションバー等を考慮
-            let isVeryCompact = geometry.size.height < 700
-            let isExtraCompact = geometry.size.height < 600 // iPhone SE等の小さい画面
-            
-            VStack(spacing: isExtraCompact ? 4 : (isVeryCompact ? 6 : 8)) {
+    
+    @ViewBuilder
+    private var landscapeLayout: some View {
+        HStack(spacing: 16) {
+            VStack(spacing: 12) {
                 scoreSection
-                    .frame(height: isExtraCompact ? 100 : (isVeryCompact ? 120 : 160))
-                    .padding(.horizontal, 12)
+                    .frame(height: 200)
                 
                 timelineSection
-                    .frame(height: isExtraCompact ? 120 : (isVeryCompact ? 140 : 150))
-                    .padding(.horizontal, 12)
+                    .frame(height: 120)
                 
+                Spacer()
+            }
+            .frame(maxWidth: 400)
+            
+            VStack(spacing: 16) {
                 currentStageSection
-                    .frame(height: isExtraCompact ? 35 : (isVeryCompact ? 40 : 50))
-                    .padding(.horizontal, 12)
+                    .frame(maxHeight: 80)
                 
                 playerSelectionSection
-                    .frame(height: isExtraCompact ? 90 : (isVeryCompact ? 110 : 130))
-                    .padding(.horizontal, 8)
+                    .frame(height: 160)
                 
-                // ラリー変更ボタンセクション（ポートレート用）
                 if canChangeRally {
                     rallyChangeSection
-                        .frame(height: isExtraCompact ? 35 : (isVeryCompact ? 40 : 45))
-                        .padding(.horizontal, 8)
+                        .frame(height: 50)
                 }
                 
-                // 柔軟なスペーサー
-                if !isExtraCompact {
-                    Spacer(minLength: 10)
-                }
+                Spacer()
                 
                 inlineActionSelectionSection
-                    .frame(height: isExtraCompact ? 100 : (isVeryCompact ? 120 : 130))
-                    .padding(.horizontal, 8)
+                    .frame(height: 140)
                 
-                // 下部の最小余白
-                Spacer(minLength: isExtraCompact ? 5 : 10)
+                Spacer(minLength: 20)
             }
-            .padding(.top, 4)
             .frame(maxWidth: .infinity)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 16)
+    }
+    
+    @ViewBuilder
+    private func portraitLayout(geometry: GeometryProxy) -> some View {
+        let isVeryCompact = geometry.size.height < 700
+        let isExtraCompact = geometry.size.height < 600
+        
+        VStack(spacing: isExtraCompact ? 4 : (isVeryCompact ? 6 : 8)) {
+            scoreSection
+                .frame(height: isExtraCompact ? 100 : (isVeryCompact ? 120 : 160))
+                .padding(.horizontal, 12)
+            
+            timelineSection
+                .frame(height: isExtraCompact ? 120 : (isVeryCompact ? 140 : 150))
+                .padding(.horizontal, 12)
+            
+            currentStageSection
+                .frame(height: isExtraCompact ? 35 : (isVeryCompact ? 40 : 50))
+                .padding(.horizontal, 12)
+            
+            playerSelectionSection
+                .frame(height: isExtraCompact ? 90 : (isVeryCompact ? 110 : 130))
+                .padding(.horizontal, 8)
+            
+            if canChangeRally {
+                rallyChangeSection
+                    .frame(height: isExtraCompact ? 35 : (isVeryCompact ? 40 : 45))
+                    .padding(.horizontal, 8)
+            }
+            
+            if !isExtraCompact {
+                Spacer(minLength: 10)
+            }
+            
+            inlineActionSelectionSection
+                .frame(height: isExtraCompact ? 100 : (isVeryCompact ? 120 : 130))
+                .padding(.horizontal, 8)
+            
+            Spacer(minLength: isExtraCompact ? 5 : 10)
+        }
+        .padding(.top, 4)
+        .frame(maxWidth: .infinity)
+    }
     
     // MARK: - UI Sections
     
     @ViewBuilder
     private var scoreSection: some View {
-        ScoreDisplaySection(viewModel: viewModel, teamA: teamA, teamB: teamB)
+        // ✨ 修正: チーム情報を渡す
+        ScoreDisplaySection(viewModel: viewModel, teamA: teamAInfo, teamB: teamBInfo)
     }
     
     @ViewBuilder
     private var timelineSection: some View {
-        ScoreTimelineView(
-            teamA: teamA,
-            teamB: teamB,
-            scoreEvents: viewModel.scoreEvents
-        )
+        // ✨ 修正: チーム情報を渡す
+        ScoreTimelineView(teamA: teamAInfo, teamB: teamBInfo, scoreEvents: viewModel.scoreEvents)
     }
     
     @ViewBuilder
     private var currentStageSection: some View {
-        CurrentStageSection(
-            rallyStage: rallyStage,
-            currentActionTeam: currentActionTeam,
-            currentTeamColor: currentTeamColor
-        )
+        // ✨ 修正: `currentActionTeam` -> `currentActionTeamInfo`
+        CurrentStageSection(rallyStage: rallyStage, currentActionTeam: currentActionTeamInfo, currentTeamColor: currentTeamColor)
     }
     
     @ViewBuilder
     private var playerSelectionSection: some View {
+        // ✨ 修正: Playerリストを渡す
         PlayerSelectionSection(
             viewModel: viewModel,
             selectedPlayer: $selectedPlayer,
-            currentActionTeam: currentActionTeam,
+            // ✨ 修正: currentActionTeamPlayers を渡すように変更
+            playersForSelection: currentActionTeamPlayers,
             currentTeamColor: currentTeamColor
         )
     }
-    
-    // MARK: - ラリー変更セクション
     
     @ViewBuilder
     private var rallyChangeSection: some View {
@@ -321,9 +301,7 @@ struct ScoreView: View {
                 .fontWeight(.medium)
                 .foregroundColor(.secondary)
             
-            Button(action: {
-                isShowingRallyChangeAlert = true
-            }) {
+            Button(action: { isShowingRallyChangeAlert = true }) {
                 HStack(spacing: 8) {
                     Image(systemName: "arrow.left.arrow.right.circle")
                         .foregroundColor(.orange)
@@ -334,7 +312,7 @@ struct ScoreView: View {
                         .fontWeight(.semibold)
                         .foregroundColor(.primary)
                     
-                    Text("(\(currentActionTeam.name) → \(currentActionTeam == teamA ? teamB.name : teamA.name))")
+                    Text("(\(currentActionTeamInfo.name) → \(currentActionTeamInfo == teamAInfo ? teamBInfo.name : teamAInfo.name))")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
@@ -352,8 +330,6 @@ struct ScoreView: View {
         }
     }
     
-    // MARK: - インラインアクション選択セクション
-    
     @ViewBuilder
     private var inlineActionSelectionSection: some View {
         VStack(spacing: 8) {
@@ -363,188 +339,85 @@ struct ScoreView: View {
                 .foregroundColor(.secondary)
             
             switch rallyStage {
-            case .serving:
-                serveActionSelection
-                
-            case .receiving:
-                receiveActionSelection
-                
-            case .setting:
-                setActionSelection
-                
-            case .attacking:
-                attackActionSelection
-                
-            case .blocking:
-                blockActionSelection
-                
-            case .gameEnd:
-                gameEndDisplay
+            case .serving:      serveActionSelection
+            case .receiving:    receiveActionSelection
+            case .setting:      setActionSelection
+            case .attacking:    attackActionSelection
+            case .blocking:     blockActionSelection
+            case .gameEnd:      gameEndDisplay
             }
         }
     }
     
-    // MARK: - サーブアクション選択
+    // MARK: - Action Selections
     
     @ViewBuilder
     private var serveActionSelection: some View {
         VStack(spacing: 8) {
             if detailSelectionState == .serveType {
-                // サーブタイプ選択
                 Text("サーブタイプを選択")
                     .font(.caption)
                     .foregroundColor(.secondary)
                 
                 HStack(spacing: 12) {
-                    ActionButton(
-                        title: "通常サーブ",
-                        systemImage: "arrow.up.circle",
-                        color: .blue,
-                        action: { handleServeType(.normal) }
-                    )
-                    
-                    ActionButton(
-                        title: "フェイントサーブ",
-                        systemImage: "eye.slash.circle",
-                        color: .purple,
-                        action: { handleServeType(.feint) }
-                    )
+                    ActionButton(title: "通常サーブ", systemImage: "arrow.up.circle", color: .blue) { handleServeType(.normal) }
+                    ActionButton(title: "フェイントサーブ", systemImage: "eye.slash.circle", color: .purple) { handleServeType(.feint) }
                 }
             } else {
-                // 成功/失敗選択
                 HStack(spacing: 12) {
-                    ActionButton(
-                        title: "成功",
-                        systemImage: "checkmark.circle",
-                        color: .green,
-                        action: {
-                            pendingServeSuccess = true
-                            detailSelectionState = .serveType
-                        }
-                    )
-                    
-                    ActionButton(
-                        title: "失敗",
-                        systemImage: "xmark.circle",
-                        color: .red,
-                        action: {
-                            pendingServeSuccess = false
-                            processRallyEvent(type: .serve, isSuccess: false, reason: .fault)
-                        }
-                    )
+                    ActionButton(title: "成功", systemImage: "checkmark.circle", color: .green) {
+                        pendingServeSuccess = true
+                        detailSelectionState = .serveType
+                    }
+                    ActionButton(title: "失敗", systemImage: "xmark.circle", color: .red) {
+                        pendingServeSuccess = false
+                        // ✨ 修正: ViewModelのメソッドを直接呼び出す
+                        processRallyEvent(type: .serve, isSuccess: false, reason: .fault)
+                    }
                 }
             }
         }
     }
     
-    // MARK: - レシーブアクション選択
-    
     @ViewBuilder
     private var receiveActionSelection: some View {
         HStack(spacing: 12) {
-            ActionButton(
-                title: "成功",
-                systemImage: "checkmark.circle",
-                color: .green,
-                action: { processRallyEvent(type: .receive, isSuccess: true) }
-            )
-            
-            ActionButton(
-                title: "失敗",
-                systemImage: "xmark.circle",
-                color: .red,
-                action: { processRallyEvent(type: .receive, isSuccess: false, reason: .fault) }
-            )
+            ActionButton(title: "成功", systemImage: "checkmark.circle", color: .green) { processRallyEvent(type: .receive, isSuccess: true) }
+            ActionButton(title: "失敗", systemImage: "xmark.circle", color: .red) { processRallyEvent(type: .receive, isSuccess: false, reason: .fault) }
         }
     }
-    
-    // MARK: - セットアクション選択
     
     @ViewBuilder
     private var setActionSelection: some View {
         VStack(spacing: 8) {
             if detailSelectionState == .setFailureReason {
-                // 失敗理由選択
                 Text("失敗理由を選択")
                     .font(.caption)
                     .foregroundColor(.secondary)
                 
                 HStack(spacing: 8) {
-                    ActionButton(
-                        title: "オーバーセット",
-                        systemImage: "arrow.up.circle",
-                        color: .orange,
-                        action: { handleSetFailure(.overSet) }
-                    )
-                    
-                    ActionButton(
-                        title: "チャンスボール",
-                        systemImage: "circle.dotted",
-                        color: .blue,
-                        action: { handleSetFailure(.chanceBall) }
-                    )
+                    ActionButton(title: "オーバーセット", systemImage: "arrow.up.circle", color: .orange) { handleSetFailure(.overSet) }
+                    ActionButton(title: "チャンスボール", systemImage: "circle.dotted", color: .blue) { handleSetFailure(.chanceBall) }
                 }
             } else {
-                // 成功/失敗選択
                 HStack(spacing: 12) {
-                    ActionButton(
-                        title: "成功",
-                        systemImage: "checkmark.circle",
-                        color: .green,
-                        action: { processRallyEvent(type: .setting, isSuccess: true) }
-                    )
-                    
-                    ActionButton(
-                        title: "失敗",
-                        systemImage: "xmark.circle",
-                        color: .red,
-                        action: { detailSelectionState = .setFailureReason }
-                    )
+                    ActionButton(title: "成功", systemImage: "checkmark.circle", color: .green) { processRallyEvent(type: .setting, isSuccess: true) }
+                    ActionButton(title: "失敗", systemImage: "xmark.circle", color: .red) { detailSelectionState = .setFailureReason }
                 }
             }
         }
     }
     
-    // MARK: - アタックアクション選択
-    
     @ViewBuilder
     private var attackActionSelection: some View {
         VStack(spacing: 8) {
             if detailSelectionState == .attackOutcome, let attackChoice = pendingAttackChoice {
-                // アタック結果の詳細選択
                 attackOutcomeSelection(for: attackChoice)
             } else {
-                // 基本3択
                 HStack(spacing: 8) {
-                    ActionButton(
-                        title: "得点",
-                        systemImage: "star.circle",
-                        color: .green,
-                        action: {
-                            pendingAttackChoice = .point
-                            detailSelectionState = .attackOutcome
-                        }
-                    )
-                    
-                    ActionButton(
-                        title: "相手得点",
-                        systemImage: "minus.circle",
-                        color: .red,
-                        action: {
-                            pendingAttackChoice = .opponentPoint
-                            detailSelectionState = .attackOutcome
-                        }
-                    )
-                    
-                    ActionButton(
-                        title: "ラリー継続",
-                        systemImage: "arrow.clockwise.circle",
-                        color: .blue,
-                        action: {
-                            pendingAttackChoice = .rallyContinue
-                            detailSelectionState = .attackOutcome
-                        }
-                    )
+                    ActionButton(title: "得点", systemImage: "star.circle", color: .green) { pendingAttackChoice = .point; detailSelectionState = .attackOutcome }
+                    ActionButton(title: "相手得点", systemImage: "minus.circle", color: .red) { pendingAttackChoice = .opponentPoint; detailSelectionState = .attackOutcome }
+                    ActionButton(title: "ラリー継続", systemImage: "arrow.clockwise.circle", color: .blue) { pendingAttackChoice = .rallyContinue; detailSelectionState = .attackOutcome }
                 }
             }
         }
@@ -558,97 +431,33 @@ struct ScoreView: View {
                 .foregroundColor(.secondary)
             
             switch choice {
-                    case .point:
-                        // 得点の場合のアタックタイプ選択 - 2×2レイアウト
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 6) {
-                            ActionButton(
-                                title: "通常アタック",
-                                systemImage: "arrow.clockwise",
-                                color: .green,
-                                action: { handleAttackPoint(.attack) }
-                            )
-                            
-                            ActionButton(
-                                title: "フェイント",
-                                systemImage: "eye.slash",
-                                color: .green,
-                                action: { handleAttackPoint(.attack_feint) }
-                            )
-                            ActionButton(
-                                title: "ヘディング",
-                                systemImage: "person.circle",
-                                color: .green,
-                                action: { handleAttackPoint(.heading) }
-                            )
-                            ActionButton(
-                                title: "ネットタッチ・オーバー",
-                                systemImage: "scissors",
-                                color: .green,
-                                action: { handleAttackFailure(.fault) }
-                            )
-                        }
-                
-            case .opponentPoint:
-                // 相手得点の場合の失敗理由選択
-                HStack(spacing: 6) {
-                    ActionButton(
-                        title: "アウト",
-                        systemImage: "arrow.up.circle",
-                        color: .red,
-                        action: { handleAttackFailure(.out) }
-                    )
-                    ActionButton(
-                        title: "ネット",
-                        systemImage: "network",
-                        color: .red,
-                        action: { handleAttackFailure(.net) }
-                    )
-                    ActionButton(
-                        title: "ネットタッチ・オーバー",
-                        systemImage: "xmark.circle",
-                        color: .red,
-                        action: { handleAttackFailure(.fault) }
-                    )
+            case .point:
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 6) {
+                    ActionButton(title: "通常アタック", systemImage: "arrow.clockwise", color: .green) { handleAttackPoint(.attack) }
+                    ActionButton(title: "フェイント", systemImage: "eye.slash", color: .green) { handleAttackPoint(.attack_feint) }
+                    ActionButton(title: "ヘディング", systemImage: "person.circle", color: .green) { handleAttackPoint(.heading) }
+                    ActionButton(title: "ネットタッチ・オーバー", systemImage: "scissors", color: .green) { handleAttackFailure(.fault) }
                 }
-                
+            case .opponentPoint:
+                HStack(spacing: 6) {
+                    ActionButton(title: "アウト", systemImage: "arrow.up.circle", color: .red) { handleAttackFailure(.out) }
+                    ActionButton(title: "ネット", systemImage: "network", color: .red) { handleAttackFailure(.net) }
+                    ActionButton(title: "ネットタッチ・オーバー", systemImage: "xmark.circle", color: .red) { handleAttackFailure(.fault) }
+                }
             case .rallyContinue:
-                // ラリー継続の場合の選択
                 HStack(spacing: 8) {
-                    ActionButton(
-                        title: "ブロックされた",
-                        systemImage: "shield.circle",
-                        color: .blue,
-                        action: { handleAttackBlocked() }
-                    )
-                    ActionButton(
-                        title: "レシーブされた",
-                        systemImage: "arrow.down.circle",
-                        color: .cyan,
-                        action: { handleAttackReceived() }
-                    )
+                    ActionButton(title: "ブロックされた", systemImage: "shield.circle", color: .blue) { handleAttackBlocked() }
+                    ActionButton(title: "レシーブされた", systemImage: "arrow.down.circle", color: .cyan) { handleAttackReceived() }
                 }
             }
         }
     }
     
-    // MARK: - ブロックアクション選択
-    
     @ViewBuilder
     private var blockActionSelection: some View {
         HStack(spacing: 8) {
-            ActionButton(
-                title: "ブロック\nカバーした",
-                systemImage: "arrow.clockwise.circle",
-                color: .green,
-                action: { processBlockCover() }
-            )
-            
-            ActionButton(
-                title: "相手に拾われた",
-                systemImage: "arrow.right.circle",
-                color: .blue,
-                action: { processBlockToReceive() }
-            )
+            ActionButton(title: "ブロック\nカバーした", systemImage: "arrow.clockwise.circle", color: .green) { processBlockCover() }
+            ActionButton(title: "相手に拾われた", systemImage: "arrow.right.circle", color: .blue) { processBlockToReceive() }
         }
     }
     
@@ -664,29 +473,15 @@ struct ScoreView: View {
             .cornerRadius(8)
     }
     
-    // MARK: - 攻守交代処理
-        
-        /// ラリー内で攻守を交代してレシーブ段階に移行（サーブ権は維持）
-        private func switchServeAndReceive() {
-            print("🔄 Manual rally switch initiated")
-            print("🔄 Before switch - Serve team: \(viewModel.isServeA ? "A" : "B"), Stage: \(rallyStage), Current action team: \(currentActionTeam.name)")
-            
-            // ViewModelの攻守交代メソッドを呼び出し
-            viewModel.switchRallyFlow()
-            
-            print("🔄 After switch - Serve team: \(viewModel.isServeA ? "A" : "B"), Stage: \(viewModel.rallyStage), New action team: \(currentActionTeam.name)")
-            
-            // プレイヤー選択をリセット
-            DispatchQueue.main.async {
-                self.autoSelectPlayer(for: .receiving)
-                self.detailSelectionState = .none
-            }
-            
-            print("🔄 Rally flow switched while maintaining serve rights")
-        }
-
+    // MARK: - Action Handling Methods
     
-    // MARK: - アクション処理メソッド
+    private func switchServeAndReceive() {
+        viewModel.switchRallyFlow()
+        DispatchQueue.main.async {
+            self.autoSelectPlayer(for: .receiving)
+            self.detailSelectionState = .none
+        }
+    }
     
     private func handleServeType(_ type: ServeType) {
         let statType: StatType = (type == .normal) ? .serve : .serve_feint
@@ -710,6 +505,7 @@ struct ScoreView: View {
     }
     
     private func handleAttackBlocked() {
+        // ✨ 修正: ViewModelの状態を直接変更
         viewModel.rallyStage = .blocking
         resetAttackState()
     }
@@ -726,12 +522,9 @@ struct ScoreView: View {
     
     private func getAttackOutcomeTitle(for choice: AttackChoice) -> String {
         switch choice {
-        case .point:
-            return "アタックタイプを選択"
-        case .opponentPoint:
-            return "失敗理由を選択"
-        case .rallyContinue:
-            return "継続理由を選択"
+        case .point: return "アタックタイプを選択"
+        case .opponentPoint: return "失敗理由を選択"
+        case .rallyContinue: return "継続理由を選択"
         }
     }
     
@@ -741,133 +534,62 @@ struct ScoreView: View {
         DispatchQueue.main.async {
             switch stage {
             case .serving:
-                let server = self.servingTeam.players.first { $0.position == .tekong }
-                self.selectedPlayer = server
-                
-            case .receiving:
-                self.selectedPlayer = nil
-                
+                // ✨ 修正: `servingTeamPlayers` からサーバーを探す
+                selectedPlayer = servingTeamPlayers.first { $0.position == .tekong }
+            case .receiving, .blocking, .gameEnd:
+                selectedPlayer = nil
             case .setting:
-                // ラリーフローが反転されている場合は適切なチームのフィーダーを選択
-                let targetTeam = self.viewModel.rallyFlowReversed ? self.servingTeam : self.receivingTeam
-                let feeder = targetTeam.players.first { $0.position == .feeder }
-                self.selectedPlayer = feeder
-
+                // ✨ 修正: `currentActionTeamPlayers` からフィーダーを探す
+                selectedPlayer = currentActionTeamPlayers.first { $0.position == .feeder }
             case .attacking:
-                // ラリーフローが反転されている場合は適切なチームのストライカーを選択
-                let targetTeam = self.viewModel.rallyFlowReversed ? self.servingTeam : self.receivingTeam
-                let striker = targetTeam.players.first { $0.position == .striker }
-                self.selectedPlayer = striker
-                
-            case .blocking:
-                self.selectedPlayer = nil
-                
-            case .gameEnd:
-                self.selectedPlayer = nil
+                // ✨ 修正: `currentActionTeamPlayers` からストライカーを探す
+                selectedPlayer = currentActionTeamPlayers.first { $0.position == .striker }
             }
         }
     }
     
+    // ✨ 修正: Statの生成と保存をViewModelに一任する
     private func processRallyEvent(type: StatType, isSuccess: Bool, reason: FailureReason? = nil) {
         guard let player = selectedPlayer else {
-            if type == .serve || type == .serve_feint {
-                if let server = servingTeam.players.first(where: { $0.position == .tekong }) {
-                    processRallyEventInternal(player: server, type: type, isSuccess: isSuccess, reason: reason)
-                }
+            // サーブなど、選手が自動で決まる場合
+            if let server = servingTeamPlayers.first(where: { $0.position == .tekong }), (type == .serve || type == .serve_feint) {
+                viewModel.processRallyEvent(player: server, type: type, isSuccess: isSuccess, reason: reason)
             }
             return
         }
-        processRallyEventInternal(player: player, type: type, isSuccess: isSuccess, reason: reason)
-    }
-
-    private func processRallyEventInternal(player: Player, type: StatType, isSuccess: Bool, reason: FailureReason? = nil) {
-        let stat = Stat(type: type, isSuccess: isSuccess, failureReason: reason)
-        player.addStat(stat)
-        
-        do {
-            try modelContext.save()
-        } catch {
-            print("Error saving model context: \(error)")
-        }
-        
-        viewModel.processRallyEvent(
-            player: player,
-            type: type,
-            isSuccess: isSuccess,
-            reason: reason
-        )
+        viewModel.processRallyEvent(player: player, type: type, isSuccess: isSuccess, reason: reason)
     }
     
+    // ✨ 修正: Statの生成と保存をViewModelに一任する
     private func processSetFailureWithReceive(reason: FailureReason) {
-        guard selectedPlayer != nil else { return }
-        
-        processRallyEvent(type: .setting, isSuccess: false, reason: reason)
-        
-        DispatchQueue.main.async {
-            if reason == .overSet || reason == .chanceBall {
-                viewModel.rallyStage = .receiving
-            }
-        }
+        guard let player = selectedPlayer else { return }
+        viewModel.processSetFailure(player: player, reason: reason)
     }
     
+    // ✨ 修正: Statの生成と保存をViewModelに一任する
     private func processAttackReceivedInternal() {
         guard let player = selectedPlayer else { return }
-        
-        let stat = Stat(type: .rollspike, isSuccess: false, failureReason: .received)
-        player.addStat(stat)
-        
-        do {
-            try modelContext.save()
-        } catch {
-            print("Error saving model context: \(error)")
-        }
-        
+        // ✨ エラー修正: 引数の順序をモデル定義に合わせる
+        let stat = Stat(type: .attack, matchID: selectedMatch.id, isSuccess: false, failureReason: .received)
         viewModel.processAttackReceived(player: player, originalStat: stat)
     }
     
+    // ✨ 修正: Statの生成と保存をViewModelに一任する
     private func processBlockCover() {
         guard let player = selectedPlayer else { return }
-        
-        let stat = Stat(type: .rollspike, isSuccess: false, failureReason: .blockCover)
-        player.addStat(stat)
-        
-        do {
-            try modelContext.save()
-        } catch {
-            print("Error saving model context: \(error)")
-        }
-        
+        // ✨ エラー修正: 引数の順序をモデル定義に合わせる
+        let stat = Stat(type: .block, matchID: selectedMatch.id, isSuccess: true, failureReason: .blockCover)
         viewModel.processBlockCover(player: player, originalStat: stat)
     }
     
+    // ✨ 修正: Statの生成と保存をViewModelに一任する
     private func processBlockToReceive() {
         guard let player = selectedPlayer else { return }
-        
-        let stat = Stat(type: .rollspike, isSuccess: false, failureReason: .blocked)
-        player.addStat(stat)
-        
-        do {
-            try modelContext.save()
-        } catch {
-            print("Error saving model context: \(error)")
-        }
-        
-        viewModel.isServeA.toggle()
-        viewModel.rallyStage = .receiving
-        
-        viewModel.scoreEvents.append(ScoreEvent(
-            scoreA: viewModel.scoreA,
-            scoreB: viewModel.scoreB,
-            scoringTeam: viewModel.isServeA ? "A" : "B",
-            timestamp: Date(),
-            playerName: player.name,
-            actionType: .rollspike,
-            isSuccess: false,
-            hasServeRight: viewModel.isServeA
-        ))
+        // ✨ エラー修正: 引数の順序をモデル定義に合わせる
+        let stat = Stat(type: .block, matchID: selectedMatch.id, isSuccess: false, failureReason: .received)
+        viewModel.processBlockCounterAttack(player: player, originalStat: stat)
     }
 }
-
 // MARK: - 追加定義
 
 enum ServeType {
@@ -878,7 +600,7 @@ enum AttackChoice {
     case point, opponentPoint, rallyContinue
 }
 
-// MARK: - Helper Views
+// MARK: - Helper Views (変更なし)
 
 struct PlayerSelectionButton: View {
     let player: Player
@@ -918,13 +640,13 @@ struct PlayerSelectionButton: View {
             .background(
                 isSelected ?
                 selectionColor.opacity(0.15) :
-                (isSelectable ? Color.gray.opacity(0.05) : Color.gray.opacity(0.02))
+                    (isSelectable ? Color.gray.opacity(0.05) : Color.gray.opacity(0.02))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(
                         isSelected ? selectionColor :
-                        (isSelectable ? Color.gray.opacity(0.3) : Color.gray.opacity(0.15)),
+                            (isSelectable ? Color.gray.opacity(0.3) : Color.gray.opacity(0.15)),
                         lineWidth: isSelected ? 2 : 1
                     )
             )
@@ -972,53 +694,14 @@ struct ActionButton: View {
 
 #Preview {
     @Previewable @State var previewMatch: Match? = nil
-    @Previewable @State var previewContainer: ModelContainer? = nil
     
-    Group {
-        if let match = previewMatch, let container = previewContainer {
-            ScoreView(match: match)
-                .modelContainer(container)
-        } else {
-            ProgressView("Loading...")
-        }
-    }
-    .task {
-        let container = try! ModelContainer(
-            for: Team.self, Match.self, Player.self,
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
-        )
-        
-        let context = container.mainContext
-        
-        let teamA = Team(name: "チーム A", color: .blue)
-        let teamB = Team(name: "チーム B", color: .red)
-        
-        let playerA1 = Player(name: "選手A1", position: .tekong, team: teamA)
-        let playerA2 = Player(name: "選手A2", position: .feeder, team: teamA)
-        let playerA3 = Player(name: "選手A3", position: .striker, team: teamA)
-        
-        let playerB1 = Player(name: "選手B1", position: .tekong, team: teamB)
-        let playerB2 = Player(name: "選手B2", position: .feeder, team: teamB)
-        let playerB3 = Player(name: "選手B3", position: .striker, team: teamB)
-        
-        teamA.players = [playerA1, playerA2, playerA3]
-        teamB.players = [playerB1, playerB2, playerB3]
-        
-        let match = Match(date: Date(), teamA: teamA, teamB: teamB, teamAServesFirst: true)
-        
-        context.insert(teamA)
-        context.insert(teamB)
-        context.insert(playerA1)
-        context.insert(playerA2)
-        context.insert(playerA3)
-        context.insert(playerB1)
-        context.insert(playerB2)
-        context.insert(playerB3)
-        context.insert(match)
-        
-        try! context.save()
-        
-        previewMatch = match
-        previewContainer = container
-    }
+    // SwiftDataのコンテナをプレビュー用にセットアップ
+    let container = PreviewSampleData.container
+    
+    // コンテナから最初の試合データを取得
+    let fetchDescriptor = FetchDescriptor<Match>()
+    let match = try! container.mainContext.fetch(fetchDescriptor).first!
+    
+    return ScoreView(match: match)
+        .modelContainer(container)
 }

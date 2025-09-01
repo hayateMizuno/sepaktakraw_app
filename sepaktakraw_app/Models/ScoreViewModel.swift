@@ -46,6 +46,7 @@ class ScoreViewModel: ObservableObject {
     private var pointHistory: [GameState] = []
     private var rallyActionHistory: [RallyAction] = []
     private let initialServeIsTeamA: Bool
+    private let matchID: UUID
     
     init(teamAServesFirst: Bool, matchID: UUID) {
         self.isServeA = teamAServesFirst
@@ -125,7 +126,8 @@ class ScoreViewModel: ObservableObject {
     }
 
     func processRallyEvent(player: Player, type: StatType, isSuccess: Bool, reason: FailureReason? = nil) {
-        let stat = Stat(type: type, isSuccess: isSuccess, failureReason: reason)
+        let stat = Stat(type: type, matchID: self.matchID, isSuccess: isSuccess, failureReason: reason)
+        player.addStat(stat)
         rallyActionHistory.append(RallyAction(player: player, stat: stat, stageBeforeAction: self.rallyStage, previousScoreEventsCount: scoreEvents.count))
         
         let currentScoringTeamName = isServeA ? "A" : "B"
@@ -178,7 +180,9 @@ class ScoreViewModel: ObservableObject {
     }
     
     func processSetFailure(player: Player, reason: FailureReason) {
-        let stat = Stat(type: .setting, isSuccess: false, failureReason: reason)
+        // ✨ エラー修正: Stat生成時にmatchIDを渡す
+        let stat = Stat(type: .setting, matchID: self.matchID, isSuccess: false, failureReason: reason)
+        player.addStat(stat)
         rallyActionHistory.append(RallyAction(player: player, stat: stat, stageBeforeAction: self.rallyStage, previousScoreEventsCount: scoreEvents.count))
         
         let currentScoringTeamName = isServeA ? "A" : "B"
@@ -204,7 +208,7 @@ class ScoreViewModel: ObservableObject {
             self.rallyStage = .receiving
         }
     }
-
+    
     func processBlockCounterAttack(player: Player, originalStat: Stat) {
         rallyActionHistory.append(RallyAction(player: player, stat: originalStat, stageBeforeAction: self.rallyStage, previousScoreEventsCount: scoreEvents.count))
         

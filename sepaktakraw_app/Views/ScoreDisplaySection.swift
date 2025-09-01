@@ -246,55 +246,45 @@ struct ServeArrowView: View {
 #Preview {
     @MainActor
     struct ScoreDisplaySectionPreview: View {
+        private static let previewMatchID = UUID()
+
         @StateObject var mockViewModel: ScoreViewModel = {
-            let vm = ScoreViewModel(teamAServesFirst: true)
+            let vm = ScoreViewModel(teamAServesFirst: true, matchID: previewMatchID)
             vm.scoreA = 15
             vm.scoreB = 12
             vm.isServeA = true
-            // サンプルイベント追加
-            vm.scoreEvents.append(ScoreEvent(
-                scoreA: 1,
-                scoreB: 0,
-                scoringTeam: "A",
-                timestamp: Date(),
-                playerName: "田中",
-                actionType: .serve,
-                isSuccess: true,
-                hasServeRight: true
-            ))
-            vm.gameOutcomeMessage = "" // プレビュー用は空
+            vm.scoreEvents.append(ScoreEvent(scoreA: 1, scoreB: 0, scoringTeam: "A", timestamp: Date(), playerName: "田中", actionType: .serve, isSuccess: true, hasServeRight: true))
+            vm.gameOutcomeMessage = ""
             return vm
         }()
         
-        // モックチームA
         let mockTeamA: Team = {
             let team = Team(name: "東京チーム", color: .blue)
-            let p1 = Player(name: "田中 太郎", position: .tekong, team: team)
-            let p2 = Player(name: "佐藤 次郎", position: .feeder, team: team)
-            let p3 = Player(name: "鈴木 三郎", position: .striker, team: team)
+            // ✨ エラー修正: dominantFoot を追加
+            let p1 = Player(name: "田中 太郎", position: .tekong, dominantFoot: .right, team: team)
+            let p2 = Player(name: "佐藤 次郎", position: .feeder, dominantFoot: .right, team: team)
+            let p3 = Player(name: "鈴木 三郎", position: .striker, dominantFoot: .left, team: team)
             team.players = [p1, p2, p3]
             return team
         }()
         
-        // モックチームB
         let mockTeamB: Team = {
             let team = Team(name: "大阪チーム", color: .red)
-            let p4 = Player(name: "高橋 四郎", position: .tekong, team: team)
-            let p5 = Player(name: "伊藤 五郎", position: .feeder, team: team)
-            let p6 = Player(name: "渡辺 六郎", position: .striker, team: team)
+            // ✨ エラー修正: dominantFoot を追加
+            let p4 = Player(name: "高橋 四郎", position: .tekong, dominantFoot: .right, team: team)
+            let p5 = Player(name: "伊藤 五郎", position: .feeder, dominantFoot: .left, team: team)
+            let p6 = Player(name: "渡辺 六郎", position: .striker, dominantFoot: .right, team: team)
             team.players = [p4, p5, p6]
             return team
         }()
 
         var body: some View {
             VStack(spacing: 20) {
-                // サーブ権切り替えボタン（プレビュー用）
                 Button("サーブ権切り替え") {
                     mockViewModel.isServeA.toggle()
                 }
                 .buttonStyle(.borderedProminent)
                 
-                // メインコンポーネント
                 ScoreDisplaySection(
                     viewModel: mockViewModel,
                     teamA: mockTeamA,
