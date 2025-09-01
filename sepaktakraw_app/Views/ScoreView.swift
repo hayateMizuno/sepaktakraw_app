@@ -44,6 +44,7 @@ struct ScoreView: View {
     @StateObject private var viewModel: ScoreViewModel
     @Environment(\.modelContext) private var modelContext
     @State private var isShowingResetAlert = false
+    @State private var isShowingRallyChangeAlert = false
     @Bindable var selectedMatch: Match
     @State private var selectedPlayer: Player?
     @State private var gameState: GameState = .rally
@@ -83,9 +84,11 @@ struct ScoreView: View {
         case .serving:
             return servingTeam
         case .receiving, .setting, .attacking:
-            return receivingTeam
+            // ラリーフローが反転されている場合は逆のチーム
+            return viewModel.rallyFlowReversed ? servingTeam : receivingTeam
         case .blocking:
-            return servingTeam
+            // ブロック段階では元々のサーブチーム
+            return viewModel.rallyFlowReversed ? receivingTeam : servingTeam
         case .gameEnd:
             return servingTeam
         }
@@ -93,6 +96,11 @@ struct ScoreView: View {
     
     private var currentTeamColor: Color { currentActionTeam.color }
     private var rallyStage: RallyStage { viewModel.rallyStage }
+    
+    // ラリー変更ボタンが表示可能かどうか
+    private var canChangeRally: Bool {
+        return rallyStage == .receiving || rallyStage == .setting || rallyStage == .attacking
+    }
 
     // MARK: - Body
     
@@ -128,7 +136,17 @@ struct ScoreView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack {
+                    HStack(spacing: 12) {
+                        // ラリー変更ボタン
+                        if canChangeRally {
+                            Button(action: {
+                                isShowingRallyChangeAlert = true
+                            }) {
+                                Image(systemName: "arrow.left.arrow.right.circle")
+                                    .foregroundColor(.orange)
+                            }
+                        }
+                        
                         Button(action: {
                             viewModel.undo()
                             autoSelectPlayer(for: viewModel.rallyStage)
@@ -137,6 +155,12 @@ struct ScoreView: View {
                             Image(systemName: "arrow.uturn.backward")
                         }
                         .disabled(!viewModel.canUndo)
+                        
+                        Button(action: {
+                            isShowingResetAlert = true
+                        }) {
+                            Image(systemName: "arrow.clockwise")
+                        }
                     }
                 }
             }
@@ -152,74 +176,105 @@ struct ScoreView: View {
             } message: {
                 Text("本当にゲームをリセットしますか？この操作は元に戻せません。")
             }
+            .alert("ラリー変更確認", isPresented: $isShowingRallyChangeAlert) {
+                Button("変更", role: .destructive) {
+                    switchServeAndReceive()
+                }
+                Button("キャンセル", role: .cancel) {}
+            } message: {
+                Text("攻守を交代してラリーを継続しますか？\n（\(currentActionTeam.name) → \(currentActionTeam == teamA ? teamB.name : teamA.name)）")
+            }
         }
     }
     
     // MARK: - Layout Views
-    
-    @ViewBuilder
-    private var landscapeLayout: some View {
-        HStack(spacing: 16) {
-            VStack(spacing: 12) {
+        
+        @ViewBuilder
+        private var landscapeLayout: some View {
+            HStack(spacing: 16) {
+                VStack(spacing: 12) {
+                    scoreSection
+                        .frame(height: 200)
+                    
+                    timelineSection
+                        .frame(height: 120)
+                    
+                    Spacer()
+                }
+                .frame(maxWidth: 400)
+                
+                VStack(spacing: 16) {
+                    currentStageSection
+                        .frame(maxHeight: 80)
+                    
+                    playerSelectionSection
+                        .frame(height: 160)
+                    
+                    // ラリー変更ボタンセクション（ランドスケープ用）
+                    if canChangeRally {
+                        rallyChangeSection
+                            .frame(height: 50)
+                    }
+                    
+                    // スペーサーを追加してアクション選択を下に押し下げ
+                    Spacer()
+                    
+                    inlineActionSelectionSection
+                        .frame(height: 140)
+                    
+                    Spacer(minLength: 20)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+        }
+        
+        @ViewBuilder
+        private func portraitLayout(geometry: GeometryProxy) -> some View {
+            let availableHeight = geometry.size.height - 100 // ナビゲーションバー等を考慮
+            let isVeryCompact = geometry.size.height < 700
+            let isExtraCompact = geometry.size.height < 600 // iPhone SE等の小さい画面
+            
+            VStack(spacing: isExtraCompact ? 4 : (isVeryCompact ? 6 : 8)) {
                 scoreSection
-                    .frame(height: 200)
+                    .frame(height: isExtraCompact ? 100 : (isVeryCompact ? 120 : 160))
+                    .padding(.horizontal, 12)
                 
                 timelineSection
-                    .frame(height: 120)
+                    .frame(height: isExtraCompact ? 120 : (isVeryCompact ? 140 : 150))
+                    .padding(.horizontal, 12)
                 
-                Spacer()
-            }
-            .frame(maxWidth: 400)
-            
-            VStack(spacing: 16) {
                 currentStageSection
-                    .frame(maxHeight: 80)
+                    .frame(height: isExtraCompact ? 35 : (isVeryCompact ? 40 : 50))
+                    .padding(.horizontal, 12)
                 
                 playerSelectionSection
-                    .frame(height: 160)
+                    .frame(height: isExtraCompact ? 90 : (isVeryCompact ? 110 : 130))
+                    .padding(.horizontal, 8)
+                
+                // ラリー変更ボタンセクション（ポートレート用）
+                if canChangeRally {
+                    rallyChangeSection
+                        .frame(height: isExtraCompact ? 35 : (isVeryCompact ? 40 : 45))
+                        .padding(.horizontal, 8)
+                }
+                
+                // 柔軟なスペーサー
+                if !isExtraCompact {
+                    Spacer(minLength: 10)
+                }
                 
                 inlineActionSelectionSection
-                    .frame(height: 140)
+                    .frame(height: isExtraCompact ? 100 : (isVeryCompact ? 120 : 130))
+                    .padding(.horizontal, 8)
                 
-                Spacer()
+                // 下部の最小余白
+                Spacer(minLength: isExtraCompact ? 5 : 10)
             }
+            .padding(.top, 4)
             .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 16)
-    }
-    
-    @ViewBuilder
-    private func portraitLayout(geometry: GeometryProxy) -> some View {
-        let availableHeight = geometry.size.height - 150
-        let isVeryCompact = geometry.size.height < 700
-        
-        VStack(spacing: isVeryCompact ? 6 : 10) {
-            scoreSection
-                .frame(height: isVeryCompact ? 120 : 160)
-                .padding(.horizontal, 12)
-            
-            timelineSection
-                .frame(height: isVeryCompact ? 140 : 150)
-                .padding(.horizontal, 12)
-            
-            currentStageSection
-                .frame(height: isVeryCompact ? 40 : 50)
-                .padding(.horizontal, 12)
-            
-            playerSelectionSection
-                .frame(height: isVeryCompact ? 110 : 130)
-                .padding(.horizontal, 8)
-            
-            inlineActionSelectionSection
-                .frame(height: isVeryCompact ? 120 : 130)
-                .padding(.horizontal, 8)
-            
-            Spacer(minLength: 0)
-        }
-        .padding(.top, 8)
-        .frame(maxHeight: availableHeight)
-    }
     
     // MARK: - UI Sections
     
@@ -254,6 +309,47 @@ struct ScoreView: View {
             currentActionTeam: currentActionTeam,
             currentTeamColor: currentTeamColor
         )
+    }
+    
+    // MARK: - ラリー変更セクション
+    
+    @ViewBuilder
+    private var rallyChangeSection: some View {
+        VStack(spacing: 4) {
+            Text("ラリー変更")
+                .font(.caption2)
+                .fontWeight(.medium)
+                .foregroundColor(.secondary)
+            
+            Button(action: {
+                isShowingRallyChangeAlert = true
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.left.arrow.right.circle")
+                        .foregroundColor(.orange)
+                        .font(.title3)
+                    
+                    Text("攻守交代")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    
+                    Text("(\(currentActionTeam.name) → \(currentActionTeam == teamA ? teamB.name : teamA.name))")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .padding(.horizontal, 12)
+                .background(Color.orange.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                )
+                .cornerRadius(8)
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
     }
     
     // MARK: - インラインアクション選択セクション
@@ -572,30 +668,21 @@ struct ScoreView: View {
         
         /// ラリー内で攻守を交代してレシーブ段階に移行（サーブ権は維持）
         private func switchServeAndReceive() {
-            print("🔄 Manual attack/defense switch initiated")
+            print("🔄 Manual rally switch initiated")
+            print("🔄 Before switch - Serve team: \(viewModel.isServeA ? "A" : "B"), Stage: \(rallyStage), Current action team: \(currentActionTeam.name)")
             
-            // サーブ権は変更せず、レシーブ段階に設定
-            viewModel.rallyStage = .receiving
+            // ViewModelの攻守交代メソッドを呼び出し
+            viewModel.switchRallyFlow()
             
-            // イベントログに記録（任意）
-            viewModel.scoreEvents.append(ScoreEvent(
-                scoreA: viewModel.scoreA,
-                scoreB: viewModel.scoreB,
-                scoringTeam: viewModel.isServeA ? "A" : "B",
-                timestamp: Date(),
-                playerName: "Rally Switch",
-                actionType: .receive,
-                isSuccess: true,
-                hasServeRight: viewModel.isServeA
-            ))
+            print("🔄 After switch - Serve team: \(viewModel.isServeA ? "A" : "B"), Stage: \(viewModel.rallyStage), New action team: \(currentActionTeam.name)")
             
             // プレイヤー選択をリセット
             DispatchQueue.main.async {
                 self.autoSelectPlayer(for: .receiving)
+                self.detailSelectionState = .none
             }
             
-            print("🔄 Rally switched to receiving stage")
-            print("🔄 Serve right remains with team: \(viewModel.isServeA ? "A" : "B")")
+            print("🔄 Rally flow switched while maintaining serve rights")
         }
 
     
@@ -661,11 +748,15 @@ struct ScoreView: View {
                 self.selectedPlayer = nil
                 
             case .setting:
-                let feeder = self.receivingTeam.players.first { $0.position == .feeder }
+                // ラリーフローが反転されている場合は適切なチームのフィーダーを選択
+                let targetTeam = self.viewModel.rallyFlowReversed ? self.servingTeam : self.receivingTeam
+                let feeder = targetTeam.players.first { $0.position == .feeder }
                 self.selectedPlayer = feeder
-                
+
             case .attacking:
-                let striker = self.receivingTeam.players.first { $0.position == .striker }
+                // ラリーフローが反転されている場合は適切なチームのストライカーを選択
+                let targetTeam = self.viewModel.rallyFlowReversed ? self.servingTeam : self.receivingTeam
+                let striker = targetTeam.players.first { $0.position == .striker }
                 self.selectedPlayer = striker
                 
             case .blocking:

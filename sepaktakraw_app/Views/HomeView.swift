@@ -39,7 +39,7 @@ struct HomeView: View {
                             .cornerRadius(10)
                     }
                     
-                    // チーム・選手登録画面へ (今は仮の画面)
+                    // チーム・選手登録画面へ
                     NavigationLink(destination: TeamListView()) {
                         Label("チーム・選手登録", systemImage: "person.2.fill")
                             .font(.headline)
@@ -50,13 +50,13 @@ struct HomeView: View {
                             .cornerRadius(10)
                     }
                     
-                    // 記録閲覧画面へ (今は仮の画面)
-                    NavigationLink(destination: Text("記録閲覧画面（作成予定）")) {
-                        Label("記録を見返す", systemImage: "list.bullet.clipboard.fill")
+                    // 統計閲覧画面へ（更新）
+                    NavigationLink(destination: StatsView()) {
+                        Label("統計・記録を見る", systemImage: "chart.bar.fill")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                             .padding()
-                            .background(Color.gray)
+                            .background(Color.purple)
                             .foregroundColor(.white)
                             .cornerRadius(10)
                     }
@@ -71,5 +71,5 @@ struct HomeView: View {
 
 #Preview {
     HomeView()
-        .modelContainer(PreviewSampleData.container) // ★ 作成したコンてナを適用
+        .modelContainer(PreviewSampleData.container) // ★ 作成したコンテナを適用
 }

@@ -40,26 +40,54 @@ class ScoreViewModel: ObservableObject {
     @Published var rallyStage: RallyStage = .serving
     @Published var scoreEvents: [ScoreEvent] = []
     
+    // ラリー中の攻守交代のための状態フラグ
+    @Published var rallyFlowReversed = false
+    
     private var pointHistory: [GameState] = []
     private var rallyActionHistory: [RallyAction] = []
     private let initialServeIsTeamA: Bool
     
-    init(teamAServesFirst: Bool) {
+    init(teamAServesFirst: Bool, matchID: UUID) {
         self.isServeA = teamAServesFirst
         self.initialServeIsTeamA = teamAServesFirst
+        self.matchID = matchID
         scoreEvents.append(ScoreEvent(scoreA: 0, scoreB: 0, scoringTeam: "None", timestamp: Date(), playerName: "Game Start", actionType: .serve, isSuccess: true, hasServeRight: teamAServesFirst))
     }
     
     var canUndo: Bool { !rallyActionHistory.isEmpty || scoreEvents.count > 1 }
+    
+    /// ラリー中の攻守交代メソッド
+    func switchRallyFlow() {
+        DispatchQueue.main.async {
+            // ラリーフローを反転
+            self.rallyFlowReversed.toggle()
+            
+            // レシーブ段階に設定（攻守交代後の状態）
+            self.rallyStage = .receiving
+            
+            // イベントログに記録
+            self.scoreEvents.append(ScoreEvent(
+                scoreA: self.scoreA,
+                scoreB: self.scoreB,
+                scoringTeam: self.isServeA ? "A" : "B",
+                timestamp: Date(),
+                playerName: "Rally Switch",
+                actionType: .receive,
+                isSuccess: true,
+                hasServeRight: self.isServeA
+            ))
+        }
+    }
     
     func undo() {
         // UIの更新を引き起こす変更を遅延させる
         DispatchQueue.main.async { // ✨ DispatchQueue.main.async を追加
             if !self.rallyActionHistory.isEmpty {
                 let lastAction = self.rallyActionHistory.removeLast()
-                if let lastStatIndex = lastAction.player.stats.lastIndex(where: { $0.id == lastAction.stat.id }) {
-                    lastAction.player.stats.remove(at: lastStatIndex)
-                }
+                            // ✨ 該当プレイヤーのstats配列から、追加したStatをIDで検索して削除
+                            if let lastStatIndex = lastAction.player.stats.lastIndex(where: { $0.id == lastAction.stat.id }) {
+                                lastAction.player.stats.remove(at: lastStatIndex)
+                            }
                 if self.scoreEvents.count > lastAction.previousScoreEventsCount {
                     self.scoreEvents.removeLast(self.scoreEvents.count - lastAction.previousScoreEventsCount)
                 }
@@ -74,6 +102,10 @@ class ScoreViewModel: ObservableObject {
                     self.isServeA = self.initialServeIsTeamA
                     self.rallyStage = .serving
                 }
+                
+                // ラリーフローもリセット
+                self.rallyFlowReversed = false
+                
                 self.checkGameStatus()
             } else if self.scoreEvents.count > 1 {
                 self.scoreEvents.removeLast()
@@ -83,6 +115,10 @@ class ScoreViewModel: ObservableObject {
                     self.isServeA = lastEvent.hasServeRight
                     self.rallyStage = .serving
                 }
+                
+                // ラリーフローもリセット
+                self.rallyFlowReversed = false
+                
                 self.checkGameStatus()
             }
         }
@@ -99,20 +135,28 @@ class ScoreViewModel: ObservableObject {
         DispatchQueue.main.async { // ✨ DispatchQueue.main.async を追加
             if isSuccess {
                 switch self.rallyStage {
-                case .serving: self.rallyStage = .receiving
+                case .serving:
+                    self.rallyStage = .receiving
+                    // サーブ成功時にラリーフローをリセット
+                    self.rallyFlowReversed = false
                 case .receiving: self.rallyStage = .setting
                 case .setting: self.rallyStage = .attacking
                 case .attacking:
-                    let winnerIsTeamA = !self.isServeA
+                    let winnerIsTeamA = self.rallyFlowReversed ? self.isServeA : !self.isServeA
                     self.addPoint(forTeamA: winnerIsTeamA, player: player, type: type, isSuccess: isSuccess)
                 case .blocking:
-                    let winnerIsTeamA = self.isServeA // ブロック成功はサーブ側の得点
+                    let winnerIsTeamA = self.rallyFlowReversed ? !self.isServeA : self.isServeA
                     self.addPoint(forTeamA: winnerIsTeamA, player: player, type: type, isSuccess: isSuccess)
                 case .gameEnd:
                     break // ゲーム終了時は何もしない
                 }
             } else {
-                let winnerIsTeamA = (self.rallyStage == .serving) ? !self.isServeA : self.isServeA
+                let winnerIsTeamA: Bool
+                if self.rallyStage == .serving {
+                    winnerIsTeamA = !self.isServeA
+                } else {
+                    winnerIsTeamA = self.rallyFlowReversed ? !self.isServeA : self.isServeA
+                }
                 self.addPoint(forTeamA: winnerIsTeamA, player: player, type: type, isSuccess: isSuccess)
             }
         }
@@ -128,6 +172,8 @@ class ScoreViewModel: ObservableObject {
         DispatchQueue.main.async { // ✨ DispatchQueue.main.async を追加
             self.isServeA.toggle()
             self.rallyStage = .receiving
+            // 攻守が変わったのでラリーフローをリセット
+            self.rallyFlowReversed = false
         }
     }
     
@@ -142,6 +188,8 @@ class ScoreViewModel: ObservableObject {
         DispatchQueue.main.async { // ✨ DispatchQueue.main.async を追加
             self.isServeA.toggle()
             self.rallyStage = .attacking
+            // 攻守が変わったのでラリーフローをリセット
+            self.rallyFlowReversed = false
         }
     }
     
@@ -152,7 +200,7 @@ class ScoreViewModel: ObservableObject {
         scoreEvents.append(ScoreEvent(scoreA: scoreA, scoreB: scoreB, scoringTeam: currentScoringTeamName, timestamp: Date(), playerName: player.name, actionType: originalStat.type, isSuccess: originalStat.isSuccess, hasServeRight: isServeA))
         
         // UIの更新を遅延させる
-        DispatchQueue.main.async { // ✨ DispatchQueue.main.async を追加
+        DispatchQueue.main.async { // ✨ DispatchQuery.main.async を追加
             self.rallyStage = .receiving
         }
     }
@@ -167,6 +215,8 @@ class ScoreViewModel: ObservableObject {
         DispatchQueue.main.async { // ✨ DispatchQueue.main.async を追加
             self.isServeA.toggle()
             self.rallyStage = .attacking
+            // 攻守が変わったのでラリーフローをリセット
+            self.rallyFlowReversed = false
         }
     }
     
@@ -184,6 +234,8 @@ class ScoreViewModel: ObservableObject {
             self.isServeA.toggle()
             self.rallyStage = .serving
             self.rallyActionHistory.removeAll()
+            // 新しいラリー開始時にフローをリセット
+            self.rallyFlowReversed = false
             self.checkGameStatus()
         }
     }
@@ -201,6 +253,8 @@ class ScoreViewModel: ObservableObject {
             self.pointHistory.removeAll()
             self.rallyActionHistory.removeAll()
             self.rallyStage = .serving
+            // ラリーフローもリセット
+            self.rallyFlowReversed = false
         }
     }
 

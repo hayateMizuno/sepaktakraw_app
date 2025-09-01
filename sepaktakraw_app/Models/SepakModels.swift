@@ -26,6 +26,7 @@ enum FailureReason: String, Codable, CaseIterable {
 struct Stat: Codable, Identifiable {
     var id = UUID()
     let type: StatType // プレーの種類
+    let matchID: UUID // 試合に対するID
     let isSuccess: Bool // 成功したかどうか
     var failureReason: FailureReason? = nil // 失敗した場合の理由
 }
